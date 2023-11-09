@@ -6,7 +6,9 @@
   "scripts": {
     "generate": "ts-node ./src/codegen",
     "generate:github": "npm run generate -- --path=examples/github/schema.graphql --output=examples/github/generated/index.ts",
-    "generate:countries": "npm run generate -- --url=https://countries.trevorblades.com --output=examples/countries/generated/index.ts"
+    "generate:countries": "npm run generate -- --url=https://countries.trevorblades.com --output=examples/countries/generated/index.ts",
+    "run:github": "ts-node ./examples/github/index.ts",
+    "run:countries": "ts-node ./examples/countries/index.ts"
   },
   "keywords": [],
   "author": "",

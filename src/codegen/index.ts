@@ -1,30 +1,28 @@
-import {
-  IntrospectionQuery,
-  getIntrospectionQuery,
-  buildClientSchema,
-  GraphQLObjectType,
-  GraphQLField,
-  GraphQLOutputType,
-  GraphQLList,
-  GraphQLNonNull,
-  GraphQLArgument,
-  GraphQLType,
-  GraphQLInterfaceType,
-  GraphQLSchema,
-  GraphQLEnumType,
-  GraphQLUnionType,
-  GraphQLInputObjectType,
-  GraphQLScalarType,
-  buildSchema,
-  GraphQLFieldMap,
-  GraphQLNamedType,
-  GraphQLInputType,
-} from "graphql";
-import request from "graphql-request";
-import prettier from "prettier";
-import path from "path";
 import fs from "fs/promises";
 import {
+  GraphQLEnumType,
+  GraphQLFieldMap,
+  GraphQLInputObjectType,
+  GraphQLInputType,
+  GraphQLInterfaceType,
+  GraphQLList,
+  GraphQLNonNull,
+  GraphQLObjectType,
+  GraphQLOutputType,
+  GraphQLScalarType,
+  GraphQLSchema,
+  GraphQLType,
+  GraphQLUnionType,
+  IntrospectionQuery,
+  buildClientSchema,
+  buildSchema,
+  getIntrospectionQuery,
+} from "graphql";
+import request from "graphql-request";
+import path from "path";
+import prettier from "prettier";
+import {
+  CallSignatureDeclarationStructure,
   InterfaceDeclarationStructure,
   JSDocStructure,
   ParameterDeclarationStructure,
@@ -32,6 +30,7 @@ import {
   StatementStructures,
   StructureKind,
   TypeParameterDeclarationStructure,
+  VariableDeclarationKind,
 } from "ts-morph";
 
 function resolveToRootType(type: GraphQLType) {
@@ -265,6 +264,10 @@ function builderFunctionsForInlineFragments(
     throw new Error("Expected object, interface, or union type");
   }
   for (const possibleType of possibleTypes) {
+    let outputPossibleTypes = `Exclude<PossibleTypes_${type.name}, "${type.name}">`;
+    if (type instanceof GraphQLObjectType) {
+      outputPossibleTypes = `PossibleTypes_${type.name}`;
+    }
     iface.callSignatures?.push({
       typeParameters: [
         {
@@ -285,10 +288,10 @@ function builderFunctionsForInlineFragments(
       ],
       returnType: `
         {
-          kind: "inline_fragment";
-          _output: SelectionSetOutput<Result, Exclude<PossibleTypes_${type.name}, "${type.name}">>;
-          typeCondition: "${possibleType}";
-          possibleTypes: Exclude<PossibleTypes_${type.name}, "${type.name}">;
+          readonly kind: "inline_fragment";
+          readonly _output: SelectionSetOutput<Result, ${outputPossibleTypes}>;
+          readonly typeCondition: "${possibleType}";
+          readonly possibleTypes: ${outputPossibleTypes};
         }
       `,
     });
@@ -385,6 +388,10 @@ function buildOperationBuilder(
         ],
         parameters: [
           {
+            name: "name",
+            type: "string",
+          },
+          {
             name: "builder",
             type: `(b: Builder_${name}) => Result`,
           },
@@ -408,6 +415,10 @@ function buildOperationBuilder(
           },
         ],
         parameters: [
+          {
+            name: "name",
+            type: "string",
+          },
           {
             name: "variables",
             type: "Variables",
@@ -449,7 +460,23 @@ async function main() {
     throw new Error("Expected --output");
   }
 
-  const file = project.createSourceFile("schema.ts");
+  const file = project.createSourceFile(
+    path.join(process.cwd(), output),
+    undefined,
+    {
+      overwrite: true,
+    }
+  );
+
+  const pathToRuntime = path.relative(
+    path.dirname(path.join(process.cwd(), output)),
+    path.join(process.cwd(), "src", "runtime.ts")
+  );
+
+  file.addImportDeclaration({
+    moduleSpecifier: "./" + pathToRuntime.replace(".ts", ""),
+    namedImports: ["builder as builderRuntime"],
+  });
 
   file.addImportDeclaration({
     moduleSpecifier: "@graphql-typed-document-node/core",
@@ -464,8 +491,8 @@ async function main() {
       readonly kind: "field";
       readonly _output: T;
       readonly name: Name;
-      readonly _alias: undefined;
-      alias<Alias extends string>(alias: Alias): FieldOutput<T, Name, Alias>;
+      readonly _alias: Alias;
+      setAlias<Alias extends string>(alias: Alias): FieldOutput<T, Name, Alias>;
     }`
   );
 
@@ -723,7 +750,62 @@ async function main() {
     `,
   });
 
-  const rootBuilderTypes: Record<string, string> = {};
+  const fragmentBuilderIfaceName = "Builder_Fragment";
+
+  statements.push({
+    kind: StructureKind.Interface,
+    name: fragmentBuilderIfaceName,
+    callSignatures: Object.values(schema.getTypeMap())
+      .map((type): CallSignatureDeclarationStructure | undefined => {
+        const resultTypeParameter = {
+          name: "Result",
+          constraint: "readonly [any, ...any[]]",
+        };
+        if (
+          type instanceof GraphQLObjectType ||
+          type instanceof GraphQLInterfaceType ||
+          type instanceof GraphQLUnionType
+        ) {
+          if (type.name.startsWith("__")) {
+            return undefined;
+          }
+          let possibleTypes = `Exclude<PossibleTypes_${type.name}, "${type.name}">`;
+          if (type instanceof GraphQLObjectType) {
+            possibleTypes = `PossibleTypes_${type.name}`;
+          }
+          return {
+            kind: StructureKind.CallSignature,
+            typeParameters: [resultTypeParameter],
+            parameters: [
+              {
+                name: "name",
+                type: "string",
+              },
+              {
+                name: "typeCondition",
+                type: `"${type.name}"`,
+              },
+              {
+                name: "builder",
+                type: `(b: Builder_${type.name}) => Result`,
+              },
+            ],
+            returnType: `{
+              readonly kind: "fragment_definition";
+              readonly _output: SelectionSetOutput<Result, ${possibleTypes}>;
+              readonly typeCondition: "${type}";
+              readonly possibleTypes: ${possibleTypes};
+            }`,
+          };
+        }
+        return undefined;
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== undefined),
+  });
+
+  const rootBuilderTypes: Record<string, string> = {
+    fragment: fragmentBuilderIfaceName,
+  };
 
   const queryType = schema.getQueryType();
   if (queryType) {
@@ -749,12 +831,36 @@ async function main() {
   statements.push({
     kind: StructureKind.TypeAlias,
     name: "Builder",
-    isExported: true,
     type: `{
       ${Object.entries(rootBuilderTypes)
         .map(([k, v]) => `readonly ${k}: ${v}`)
         .join(";\n")}
     }`,
+  });
+
+  statements.push({
+    kind: StructureKind.VariableStatement,
+    isExported: true,
+    declarationKind: VariableDeclarationKind.Const,
+    declarations: [
+      {
+        name: "b",
+        initializer: "builderRuntime as any",
+        type: "Builder",
+      },
+    ],
+  });
+
+  statements.push({
+    kind: StructureKind.TypeAlias,
+    isExported: true,
+    name: "OutputOf",
+    typeParameters: [
+      {
+        name: "T",
+      },
+    ],
+    type: "T extends { readonly _output: infer Inner } ? Inner : never",
   });
 
   file.addStatements(statements);

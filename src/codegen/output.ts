@@ -13,7 +13,7 @@ type ResponseKeyObj<
 };
 
 type DoesFragmentApply<
-  F extends InlineFragment,
+  F extends InlineFragment | FragmentDefinition,
   T extends string,
 > = F["possibleTypes"] extends infer Inner
   ? Inner extends T
@@ -32,20 +32,27 @@ type ReadonlyMerge<A, B> = A extends Function
     };
 
 type Field = {
-  kind: "field";
-  _output: any;
-  name: string;
-  _alias: string | undefined;
+  readonly kind: "field";
+  readonly _output: any;
+  readonly name: string;
+  readonly _alias: string | undefined;
 };
 
 type InlineFragment = {
-  kind: "inline_fragment";
-  _output: any;
-  typeCondition: string;
-  possibleTypes: string;
+  readonly kind: "inline_fragment";
+  readonly _output: any;
+  readonly typeCondition: string;
+  readonly possibleTypes: string;
 };
 
-type SelectionSetSelection = Field | InlineFragment;
+type FragmentDefinition = {
+  readonly kind: "fragment_definition";
+  readonly _output: any;
+  readonly typeCondition: string;
+  readonly possibleTypes: string;
+};
+
+type SelectionSetSelection = Field | InlineFragment | FragmentDefinition;
 
 type SelectionSetOutput<
   T extends ReadonlyArray<SelectionSetSelection>,
@@ -66,21 +73,14 @@ type SelectionSetOutput<
               ResponseKeyObj<Head, Head["_output"]>,
               SelectionSetOutput<Tail, PT & string>
             >
-          : Head extends InlineFragment
+          : Head extends InlineFragment | FragmentDefinition
           ? true extends DoesFragmentApply<Head, PT & string>
             ? ReadonlyMerge<
-                Extract<Head["_output"], { __typename: PT }>,
+                Extract<Head["_output"], { readonly __typename: PT & string }>,
                 SelectionSetOutput<Tail, PT & string>
               >
             : SelectionSetOutput<Tail, PT & string>
-          : // : Head extends ast.FragmentDef
-            // ? true extends DoesFragmentApply<Head, PT & string>
-            //   ? Merge<
-            //       Extract<Head["_output"], { __typename: PT }>,
-            //       SelectionSetOutput<Tail, PT & string>
-            //     >
-            //   : SelectionSetOutput<Tail, PT & string>
-            never
+          : SelectionSetOutput<Tail, PT & string>
         : {}
     >
   : never;

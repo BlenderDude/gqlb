@@ -1,9 +1,8 @@
-import { Builder } from "./generated";
+import { print } from "graphql";
+import { b } from "./generated";
 
-const b: Builder = {} as any;
-
-const res = b.query((b) => [
-  b.resource({ url: "test" }, (b) => [
+const query = b.query("ExampleGithub", { url: "URL!" }, (b, v) => [
+  b.resource({ url: v.url }, (b) => [
     //
     b.url(),
     b.resourcePath(),
@@ -17,16 +16,11 @@ const res = b.query((b) => [
       b.avatarUrl(),
     ]),
   ]),
-  b.repository({ name: "test", owner: "test" }, (b) => [
-    //
-    b.name(),
-  ]),
 ]);
 
-type Output = (typeof res._output)["resource"];
-
-const { resource } = res._output;
-
-if (resource?.__typename === "Issue") {
-  const { state } = resource;
+async function main() {
+  const doc = query.document();
+  console.log(print(doc));
 }
+
+void main();
