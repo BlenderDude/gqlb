@@ -2,9 +2,14 @@ import { OutputOf, b } from "./generated";
 import { print } from "graphql";
 import request from "graphql-request";
 
-const frag = b.fragment("Countries", "Country", (b) => [
+const subFragment = b.fragment("SubFragment", "Country", (b) => [
   //
   b.capital(),
+]);
+
+const frag = b.fragment("Countries", "Country", (b) => [
+  //
+  subFragment,
   b.currency(),
 ]);
 

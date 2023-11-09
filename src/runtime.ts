@@ -264,12 +264,17 @@ function makeOperationBuilder(type: OperationTypeNode) {
       builder = arg1;
     }
 
+    let builtDocument: DocumentNode | undefined = undefined;
+
     return {
       document() {
+        if (builtDocument) {
+          return builtDocument;
+        }
         const [selectionSet, fragments] = buildSelectionSet(
           builder(makeBuilderObject(), variables)
         );
-        return {
+        builtDocument = {
           kind: Kind.DOCUMENT,
           definitions: [
             ...fragments.values(),
@@ -285,6 +290,7 @@ function makeOperationBuilder(type: OperationTypeNode) {
             },
           ],
         };
+        return builtDocument;
       },
     };
   };
@@ -299,7 +305,7 @@ function makeFragmentBuilder() {
     const [selectionSet, fragments] = buildSelectionSet(
       builder(makeBuilderObject())
     );
-    return [
+    const result = [
       {
         kind: Kind.FRAGMENT_DEFINITION,
         name: {
@@ -316,7 +322,19 @@ function makeFragmentBuilder() {
         selectionSet,
       },
       fragments,
-    ];
+    ] as const;
+
+    (result as any).document = () => {
+      const [fragment, fragments] = result;
+      return {
+        kind: Kind.DOCUMENT,
+        definitions: [...fragments.values(), fragment],
+      };
+    };
+
+    (result as any).name = name;
+
+    return result as any;
   };
 }
 

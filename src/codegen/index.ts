@@ -797,11 +797,17 @@ async function main() {
           }
           return {
             kind: StructureKind.CallSignature,
-            typeParameters: [resultTypeParameter],
+            typeParameters: [
+              resultTypeParameter,
+              {
+                name: "Name",
+                constraint: "string",
+              },
+            ],
             parameters: [
               {
                 name: "name",
-                type: "string",
+                type: "Name",
               },
               {
                 name: "typeCondition",
@@ -814,9 +820,11 @@ async function main() {
             ],
             returnType: `{
               readonly kind: "fragment_definition";
+              readonly name: Name;
               readonly _output: SelectionSetOutput<Result, ${possibleTypes}>;
               readonly typeCondition: "${type}";
               readonly possibleTypes: ${possibleTypes};
+              document(): TypedDocumentNode<SelectionSetOutput<Result, ${possibleTypes}>, {}>;
             }`,
           };
         }
