@@ -131,8 +131,26 @@ function builderFunctionsForFields(
     };
 
     const result = (output: string, type: GraphQLOutputType) => {
-      return `FieldOutput<${wrap(output + " | null", type)}, "${field.name}">`;
+      return `FieldOutput<${wrap(output + " | null", type)}, "${
+        field.name
+      }", Alias>`;
     };
+
+    const aliasTypeParameter: TypeParameterDeclarationStructure = {
+      kind: StructureKind.TypeParameter,
+      name: "Alias",
+      constraint: "string | undefined",
+      isConst: true,
+      default: "undefined",
+    };
+
+    const aliasParameter: ParameterDeclarationStructure = {
+      kind: StructureKind.Parameter,
+      name: "alias",
+      hasQuestionToken: true,
+      type: "Alias",
+    };
+
     if (
       rootType instanceof GraphQLScalarType ||
       rootType instanceof GraphQLEnumType
@@ -157,18 +175,22 @@ function builderFunctionsForFields(
           }`;
         iface.callSignatures?.push({
           docs: [comment],
+          typeParameters: [aliasTypeParameter],
           parameters: [
             {
               name: "args",
               type: argumentType,
               hasQuestionToken: true,
             },
+            aliasParameter,
           ],
           returnType: result(output, field.type),
         });
       } else {
         iface.callSignatures?.push({
           docs: [comment],
+          typeParameters: [aliasTypeParameter],
+          parameters: [aliasParameter],
           returnType: result(output, field.type),
         });
       }
@@ -206,29 +228,30 @@ function builderFunctionsForFields(
         }`;
         iface.callSignatures?.push({
           docs: [comment],
-          typeParameters: [builderTypeParameter],
+          typeParameters: [builderTypeParameter, aliasTypeParameter],
           parameters: [
             {
               name: "args",
               type: argumentType,
             },
             builderArgument,
+            aliasParameter,
           ],
           returnType: result(output, field.type),
         });
         if (!hasRequiredArg) {
           iface.callSignatures?.push({
             docs: [comment],
-            typeParameters: [builderTypeParameter],
-            parameters: [builderArgument],
+            typeParameters: [builderTypeParameter, aliasTypeParameter],
+            parameters: [builderArgument, aliasParameter],
             returnType: result(output, field.type),
           });
         }
       } else {
         iface.callSignatures?.push({
           docs: [comment],
-          typeParameters: [builderTypeParameter],
-          parameters: [builderArgument],
+          typeParameters: [builderTypeParameter, aliasTypeParameter],
+          parameters: [builderArgument, aliasParameter],
           returnType: result(output, field.type),
         });
       }
@@ -492,7 +515,6 @@ async function main() {
       readonly _output: T;
       readonly name: Name;
       readonly _alias: Alias;
-      setAlias<Alias extends string>(alias: Alias): FieldOutput<T, Name, Alias>;
     }`
   );
 

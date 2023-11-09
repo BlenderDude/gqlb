@@ -21,17 +21,15 @@ const res = b.query("CountriesQuery", { code: "ID!" }, (b, v) => [
     ]),
     b.awsRegion(),
   ]),
+  b.country(
+    { code: "US" },
+    (b) => [
+      //
+      b.name(),
+    ],
+    "unitedStates"
+  ),
 ]);
-
-const COUNTRIES_QUERY = b.query("CountriesQuery", (b) => [
-  //
-  b.countries((b) => [
-    //
-    b.capital(),
-  ]),
-]);
-
-type CountriesOutput = OutputOf<typeof COUNTRIES_QUERY>;
 
 async function main() {
   const document = res.document();

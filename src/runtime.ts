@@ -5,20 +5,24 @@ import {
   FragmentDefinitionNode,
   InlineFragmentNode,
   Kind,
+  NameNode,
   OperationTypeNode,
   SelectionNode,
   SelectionSetNode,
+  ValueNode,
   VariableDefinitionNode,
   VariableNode,
   parseType,
 } from "graphql";
 
-type Field_ArgumentsArg = Record<string, any>;
+type Field_ArgumentsArg = Record<string, unknown>;
 type Field_BuilderArg = (b: BuilderObject) => BuilderOutput;
+type Field_AliasArg = string;
 
 type BuilderObject_Field = (
-  arg1?: Field_ArgumentsArg | Field_BuilderArg,
-  arg2?: Field_BuilderArg
+  arg1?: Field_ArgumentsArg | Field_BuilderArg | Field_AliasArg,
+  arg2?: Field_BuilderArg | Field_AliasArg,
+  arg3?: Field_AliasArg
 ) => [FieldNode, FragmentMap];
 
 type BuilderObject_Inline = (
@@ -74,6 +78,55 @@ function buildSelectionSet(
   ];
 }
 
+function makeValueNode(value: unknown): ValueNode {
+  if (value === null) {
+    return {
+      kind: Kind.NULL,
+    };
+  }
+  if (typeof value === "string") {
+    return {
+      kind: Kind.STRING,
+      value,
+    };
+  }
+  if (typeof value === "number") {
+    return {
+      kind: Kind.INT,
+      value: value.toString(),
+    };
+  }
+  if (typeof value === "boolean") {
+    return {
+      kind: Kind.BOOLEAN,
+      value,
+    };
+  }
+  if (Array.isArray(value)) {
+    return {
+      kind: Kind.LIST,
+      values: value.map((v) => makeValueNode(v)),
+    };
+  }
+  if (typeof value === "object") {
+    if (variableSymbol in value) {
+      return value[variableSymbol] as VariableNode;
+    }
+    return {
+      kind: Kind.OBJECT,
+      fields: Object.entries(value).map(([name, value]) => ({
+        kind: Kind.OBJECT_FIELD,
+        name: {
+          kind: Kind.NAME,
+          value: name,
+        },
+        value: makeValueNode(value),
+      })),
+    };
+  }
+  throw new Error(`Unsupported value: ${value}`);
+}
+
 function makeBuilderObject(): BuilderObject {
   return new Proxy(
     {},
@@ -101,14 +154,23 @@ function makeBuilderObject(): BuilderObject {
           };
           return builder;
         }
-        const builder: BuilderObject_Field = (arg1, arg2) => {
+        const builder: BuilderObject_Field = (arg1, arg2, arg3) => {
           let builder: Field_BuilderArg | undefined = undefined;
           let args: Field_ArgumentsArg | undefined = undefined;
+          let alias: Field_AliasArg | undefined = undefined;
           if (typeof arg1 === "object") {
             args = arg1;
-            builder = arg2;
+            if (typeof arg2 === "string") {
+              alias = arg2;
+            } else {
+              builder = arg2;
+              alias = arg3;
+            }
           } else if (arg1 instanceof Function) {
             builder = arg1;
+            if (typeof arg2 === "string") {
+              alias = arg2;
+            }
           }
 
           const argumentNodes: ArgumentNode[] = [];
@@ -120,7 +182,7 @@ function makeBuilderObject(): BuilderObject {
                   kind: Kind.NAME,
                   value: name,
                 },
-                value: value,
+                value: makeValueNode(value),
               });
             }
           }
@@ -133,6 +195,14 @@ function makeBuilderObject(): BuilderObject {
             fragments = result[1];
           }
 
+          let aliasNode: NameNode | undefined = undefined;
+          if (alias) {
+            aliasNode = {
+              kind: Kind.NAME,
+              value: alias,
+            };
+          }
+
           return [
             {
               kind: Kind.FIELD,
@@ -142,13 +212,7 @@ function makeBuilderObject(): BuilderObject {
               },
               arguments: argumentNodes,
               selectionSet,
-              setAlias(alias: string) {
-                (this as any).alias = {
-                  kind: Kind.NAME,
-                  value: alias,
-                };
-                return this;
-              },
+              alias: aliasNode,
             },
             fragments,
           ];
@@ -159,10 +223,12 @@ function makeBuilderObject(): BuilderObject {
   ) as any;
 }
 
+const variableSymbol = Symbol.for("variable");
+
 type Operation_VariablesArg = Record<string, string>;
 type Operation_BuilderArg = (
   b: BuilderObject,
-  variables: Record<string, VariableNode>
+  variables: Record<string, { [variableSymbol]: VariableNode }>
 ) => BuilderOutput;
 
 function makeOperationBuilder(type: OperationTypeNode) {
@@ -172,7 +238,7 @@ function makeOperationBuilder(type: OperationTypeNode) {
     arg2?: Operation_BuilderArg
   ): { document: () => DocumentNode } {
     const variableDefinitions: VariableDefinitionNode[] = [];
-    const variables: Record<string, VariableNode> = {};
+    const variables: Record<string, { [variableSymbol]: VariableNode }> = {};
     let builder: Operation_BuilderArg;
     if (typeof arg1 === "object") {
       for (const [name, type] of Object.entries(arg1)) {
@@ -192,7 +258,7 @@ function makeOperationBuilder(type: OperationTypeNode) {
       }
       builder = arg2!;
       for (const def of variableDefinitions) {
-        variables[def.variable.name.value] = def.variable;
+        variables[def.variable.name.value] = { [variableSymbol]: def.variable };
       }
     } else {
       builder = arg1;
