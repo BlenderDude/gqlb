@@ -21,7 +21,44 @@ const EXAMPLE_GITHUB_QUERY = b.query(
         //
         b.state(),
       ]),
-      BOT_FRAGMENT,
+      b.__on("Bot", (b) => [
+        b.avatarUrl(),
+        b.createdAt(),
+        b.databaseId(),
+        b.id(),
+        b.login(),
+        b.resourcePath(),
+        b.url(),
+      ]),
+      b.__on("CheckRun", (b) => [
+        b.id(),
+        b.name(),
+        b.conclusion(),
+        b.detailsUrl(),
+        b.isRequired(),
+        b.summary(),
+        b.conclusion(),
+        b.deployment((b) => [
+          //
+          b.commit((b) => [
+            //
+            b.authors((b) => [
+              //
+              b.nodes((b) => [
+                //
+                b.name(),
+              ]),
+            ]),
+          ]),
+        ]),
+        b.completedAt(),
+        b.externalId(),
+      ]),
+      b.url(),
+      b.__on("PullRequest", (b) => [
+        //
+        b.id(),
+      ]),
     ]),
   ]
 );

@@ -25,8 +25,10 @@ import {
   CallSignatureDeclarationStructure,
   InterfaceDeclarationStructure,
   JSDocStructure,
+  MethodSignatureStructure,
   ParameterDeclarationStructure,
   Project,
+  PropertySignatureStructure,
   StatementStructures,
   StructureKind,
   TypeParameterDeclarationStructure,
@@ -86,21 +88,21 @@ function argumentUnion(type: GraphQLInputType): string {
   throw new Error("Unknown input type");
 }
 
-function builderFunctionsForFields(
-  name: string,
+function methodsForFields(
   fieldMap: GraphQLFieldMap<any, any>
-): Record<string, InterfaceDeclarationStructure> {
-  const builders: Record<string, InterfaceDeclarationStructure> = {};
+): MethodSignatureStructure[] {
+  const methods: MethodSignatureStructure[] = [];
   const fields = Object.values(fieldMap);
 
   for (const field of fields) {
-    const ifaceName = `Builder_${name}_field_${field.name}`;
-    const iface: InterfaceDeclarationStructure = {
-      kind: StructureKind.Interface,
-      name: ifaceName,
-      callSignatures: [],
-    };
-    builders[field.name] = iface;
+    // const ifaceName = `Builder_${name}_field_${field.name}`;
+    // const iface: InterfaceDeclarationStructure = {
+    //   kind: StructureKind.Interface,
+    //   name: ifaceName,
+    //   callSignatures: [],
+    // };
+
+    // builders[field.name] = iface;
 
     const comment: JSDocStructure = {
       kind: StructureKind.JSDoc,
@@ -173,7 +175,9 @@ function builderFunctionsForFields(
               )} | ${variableUnion(arg.type)}`;
             })}
           }`;
-        iface.callSignatures?.push({
+        methods.push({
+          kind: StructureKind.MethodSignature,
+          name: field.name,
           docs: [comment],
           typeParameters: [aliasTypeParameter],
           parameters: [
@@ -187,7 +191,9 @@ function builderFunctionsForFields(
           returnType: result(output, field.type),
         });
       } else {
-        iface.callSignatures?.push({
+        methods.push({
+          kind: StructureKind.MethodSignature,
+          name: field.name,
           docs: [comment],
           typeParameters: [aliasTypeParameter],
           parameters: [aliasParameter],
@@ -226,7 +232,9 @@ function builderFunctionsForFields(
             })
             .join(",\n")}
         }`;
-        iface.callSignatures?.push({
+        methods.push({
+          kind: StructureKind.MethodSignature,
+          name: field.name,
           docs: [comment],
           typeParameters: [builderTypeParameter, aliasTypeParameter],
           parameters: [
@@ -240,7 +248,9 @@ function builderFunctionsForFields(
           returnType: result(output, field.type),
         });
         if (!hasRequiredArg) {
-          iface.callSignatures?.push({
+          methods.push({
+            kind: StructureKind.MethodSignature,
+            name: field.name,
             docs: [comment],
             typeParameters: [builderTypeParameter, aliasTypeParameter],
             parameters: [builderArgument, aliasParameter],
@@ -248,7 +258,9 @@ function builderFunctionsForFields(
           });
         }
       } else {
-        iface.callSignatures?.push({
+        methods.push({
+          kind: StructureKind.MethodSignature,
+          name: field.name,
           docs: [comment],
           typeParameters: [builderTypeParameter, aliasTypeParameter],
           parameters: [builderArgument, aliasParameter],
@@ -258,21 +270,15 @@ function builderFunctionsForFields(
     }
   }
 
-  return builders;
+  return methods;
 }
 
 function builderFunctionsForInlineFragments(
   name: string,
   schema: GraphQLSchema,
   type: GraphQLObjectType | GraphQLInterfaceType | GraphQLUnionType
-): Record<string, InterfaceDeclarationStructure> {
-  const ifaceName = `Builder_${name}_inlineFragment`;
-  const iface: InterfaceDeclarationStructure = {
-    kind: StructureKind.Interface,
-    name: ifaceName,
-    callSignatures: [],
-  };
-
+): MethodSignatureStructure[] {
+  const methods: MethodSignatureStructure[] = [];
   let possibleTypes: string[];
   if (type instanceof GraphQLObjectType) {
     possibleTypes = [type.name];
@@ -291,7 +297,9 @@ function builderFunctionsForInlineFragments(
     if (type instanceof GraphQLObjectType) {
       outputPossibleTypes = `PossibleTypes_${type.name}`;
     }
-    iface.callSignatures?.push({
+    methods.push({
+      kind: StructureKind.MethodSignature,
+      name: "__on",
       typeParameters: [
         {
           name: "Result",
@@ -320,16 +328,16 @@ function builderFunctionsForInlineFragments(
     });
   }
 
-  return { __on: iface };
+  return methods;
 }
 
-function buildObject(obj: Record<string, string>) {
-  let objCode = "{";
-  for (const [name, code] of Object.entries(obj)) {
-    objCode += `readonly ${name}: ${code};\n`;
-  }
-  return objCode + "}";
-}
+// function buildObject(obj: Record<string, string>) {
+//   let objCode = "{";
+//   for (const [name, code] of Object.entries(obj)) {
+//     objCode += `readonly ${name}: ${code};\n`;
+//   }
+//   return objCode + "}";
+// }
 
 function generateSelectionSetOutput() {
   return fs.readFile(path.join(__dirname, "output.ts"), "utf-8");
@@ -484,7 +492,7 @@ async function main() {
   }
 
   const file = project.createSourceFile(
-    path.join(process.cwd(), output),
+    path.join(process.cwd(), output, "types.ts"),
     undefined,
     {
       overwrite: true,
@@ -492,18 +500,14 @@ async function main() {
   );
 
   const pathToRuntime = path.relative(
-    path.dirname(path.join(process.cwd(), output)),
+    path.dirname(path.join(process.cwd(), output, "index.ts")),
     path.join(process.cwd(), "src", "runtime.ts")
   );
 
   file.addImportDeclaration({
-    moduleSpecifier: "./" + pathToRuntime.replace(".ts", ""),
-    namedImports: ["builder as builderRuntime"],
-  });
-
-  file.addImportDeclaration({
     moduleSpecifier: "@graphql-typed-document-node/core",
     namedImports: ["TypedDocumentNode"],
+    isTypeOnly: true,
   });
 
   file.insertText(file.getEnd(), await generateSelectionSetOutput());
@@ -558,27 +562,16 @@ async function main() {
         });
       }
 
-      const fieldBuilders = builderFunctionsForFields(name, type.getFields());
-      const inlineFragmentBuilders = builderFunctionsForInlineFragments(
+      const fieldMethods = methodsForFields(type.getFields());
+      const inlineFragmentMethods = builderFunctionsForInlineFragments(
         name,
         schema,
         type
       );
-      const builders: Record<string, string> = {};
-      for (const b in fieldBuilders) {
-        builders[b] = fieldBuilders[b].name;
-      }
-      for (const b in inlineFragmentBuilders) {
-        builders[b] = inlineFragmentBuilders[b].name;
-      }
-      statements.push(
-        ...Object.values(fieldBuilders),
-        ...Object.values(inlineFragmentBuilders)
-      );
       statements.push({
-        kind: StructureKind.TypeAlias,
+        kind: StructureKind.Interface,
         name: `Builder_${name}`,
-        type: buildObject(builders),
+        methods: fieldMethods.concat(inlineFragmentMethods),
       });
     } else if (type instanceof GraphQLEnumType) {
       const values = type
@@ -621,11 +614,10 @@ async function main() {
       for (const b in inlineFragmentBuilders) {
         builders[b] = inlineFragmentBuilders[b].name;
       }
-      statements.push(...Object.values(inlineFragmentBuilders));
       statements.push({
-        kind: StructureKind.TypeAlias,
+        kind: StructureKind.Interface,
         name: `Builder_${name}`,
-        type: buildObject(builders),
+        methods: inlineFragmentBuilders,
       });
     } else if (type instanceof GraphQLInputObjectType) {
       statements.push({
@@ -869,19 +861,6 @@ async function main() {
   });
 
   statements.push({
-    kind: StructureKind.VariableStatement,
-    isExported: true,
-    declarationKind: VariableDeclarationKind.Const,
-    declarations: [
-      {
-        name: "b",
-        initializer: "builderRuntime as any",
-        type: "Builder",
-      },
-    ],
-  });
-
-  statements.push({
     kind: StructureKind.TypeAlias,
     isExported: true,
     name: "OutputOf",
@@ -910,10 +889,38 @@ async function main() {
     parser: "typescript",
   });
 
-  const outputPath = path.join(process.cwd(), output);
+  const outputDir = path.join(process.cwd(), output);
 
-  await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  await fs.writeFile(outputPath, code);
+  await fs.mkdir(outputDir, { recursive: true });
+  await fs.writeFile(path.join(outputDir, "types.d.ts"), code);
+  statements.push({
+    kind: StructureKind.VariableStatement,
+    isExported: true,
+    declarationKind: VariableDeclarationKind.Const,
+    declarations: [
+      {
+        name: "b",
+        initializer: "builderRuntime as any",
+        type: "Builder",
+      },
+    ],
+  });
+
+  await fs.writeFile(
+    path.join(outputDir, "index.ts"),
+    await prettier.format(
+      `
+        import type {Builder} from "./types";
+        import {builder} from "${"./" + pathToRuntime.replace(".ts", "")}"
+        export const b = builder as any as Builder;
+        export {OutputOf} from "./types";
+      `,
+      {
+        parser: "typescript",
+      }
+    )
+  );
+
   console.log("Done!");
 }
 

@@ -21,14 +21,10 @@ type DoesFragmentApply<
     : false
   : never;
 
-type ReadonlyMerge<A, B> = A extends Function
+type ReadonlyIntersectionCollapse<T> = T extends Function
   ? never
   : {
-      readonly [K in keyof A | keyof B]: K extends keyof A
-        ? A[K & keyof A]
-        : K extends keyof B
-        ? B[K & keyof B]
-        : never;
+      readonly [K in keyof T]: T[K];
     };
 
 type Field = {
@@ -54,33 +50,33 @@ type FragmentDefinition = {
 
 type SelectionSetSelection = Field | InlineFragment | FragmentDefinition;
 
+type NeverToEmptyObj<T> = [T] extends [never] ? {} : T;
+
+type FragmentOutput<
+  T extends InlineFragment | FragmentDefinition,
+  PT extends string,
+> = NeverToEmptyObj<Extract<T["_output"], { readonly __typename: PT }>>;
+
+type BuildSelectionSet<
+  T extends ReadonlyArray<SelectionSetSelection>,
+  PT extends string,
+  Acc = {
+    readonly __typename: PT;
+  },
+> = T extends readonly [
+  infer Head extends SelectionSetSelection,
+  ...infer Tail extends ReadonlyArray<SelectionSetSelection>,
+]
+  ? Head extends Field
+    ? BuildSelectionSet<Tail, PT, Acc & ResponseKeyObj<Head, Head["_output"]>>
+    : Head extends InlineFragment | FragmentDefinition
+      ? BuildSelectionSet<Tail, PT, Acc & FragmentOutput<Head, PT>>
+      : never
+  : Acc;
+
 type SelectionSetOutput<
   T extends ReadonlyArray<SelectionSetSelection>,
   PossibleTypes extends string,
-> = T extends Function
-  ? never
-  : PossibleTypes extends infer PT
-  ? ReadonlyMerge<
-      {
-        readonly __typename: PT;
-      },
-      T extends readonly [
-        infer Head extends SelectionSetSelection,
-        ...infer Tail extends ReadonlyArray<SelectionSetSelection>,
-      ]
-        ? Head extends Field
-          ? ReadonlyMerge<
-              ResponseKeyObj<Head, Head["_output"]>,
-              SelectionSetOutput<Tail, PT & string>
-            >
-          : Head extends InlineFragment | FragmentDefinition
-          ? true extends DoesFragmentApply<Head, PT & string>
-            ? ReadonlyMerge<
-                Extract<Head["_output"], { readonly __typename: PT & string }>,
-                SelectionSetOutput<Tail, PT & string>
-              >
-            : SelectionSetOutput<Tail, PT & string>
-          : SelectionSetOutput<Tail, PT & string>
-        : {}
-    >
+> = PossibleTypes extends infer PT
+  ? ReadonlyIntersectionCollapse<BuildSelectionSet<T, PT & string>>
   : never;

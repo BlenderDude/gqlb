@@ -1,3 +1,5 @@
-**/generated/index.ts
+**/generated/*
 .env
 node_modules
+*.js
+trace
