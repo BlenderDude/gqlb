@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "gqlb": ["./src/index.ts"]
+    }
+  },
+  "include": ["./examples/**/*"]
+}

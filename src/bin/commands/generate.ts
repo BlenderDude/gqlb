@@ -23,9 +23,11 @@ import path from "path";
 import prettier from "prettier";
 import {
   CallSignatureDeclarationStructure,
+  ExpressionStatement,
   InterfaceDeclarationStructure,
   JSDocStructure,
   MethodSignatureStructure,
+  ModuleDeclarationKind,
   ParameterDeclarationStructure,
   Project,
   PropertySignatureStructure,
@@ -33,7 +35,9 @@ import {
   StructureKind,
   TypeParameterDeclarationStructure,
   VariableDeclarationKind,
+  ts,
 } from "ts-morph";
+import { arg } from "../helpers/arg";
 
 function resolveToRootType(type: GraphQLType) {
   if (type instanceof GraphQLList || type instanceof GraphQLNonNull) {
@@ -61,12 +65,6 @@ async function loadSchemaFromUrl(url: string) {
 async function loadSchemaFromFile(path: string) {
   const schema = await fs.readFile(path, "utf-8");
   return buildSchema(schema);
-}
-
-function arg(name: string) {
-  return process.argv
-    .find((arg) => arg.startsWith(`--${name}`))
-    ?.split("=", 2)[1];
 }
 
 function argumentUnion(type: GraphQLInputType): string {
@@ -133,24 +131,10 @@ function methodsForFields(
     };
 
     const result = (output: string, type: GraphQLOutputType) => {
-      return `FieldOutput<${wrap(output + " | null", type)}, "${
-        field.name
-      }", Alias>`;
-    };
-
-    const aliasTypeParameter: TypeParameterDeclarationStructure = {
-      kind: StructureKind.TypeParameter,
-      name: "Alias",
-      constraint: "string | undefined",
-      isConst: true,
-      default: "undefined",
-    };
-
-    const aliasParameter: ParameterDeclarationStructure = {
-      kind: StructureKind.Parameter,
-      name: "alias",
-      hasQuestionToken: true,
-      type: "Alias",
+      return `Field<"${field.name}", undefined, ${wrap(
+        output + " | null",
+        type
+      )}>`;
     };
 
     if (
@@ -179,14 +163,12 @@ function methodsForFields(
           kind: StructureKind.MethodSignature,
           name: field.name,
           docs: [comment],
-          typeParameters: [aliasTypeParameter],
           parameters: [
             {
               name: "args",
               type: argumentType,
               hasQuestionToken: true,
             },
-            aliasParameter,
           ],
           returnType: result(output, field.type),
         });
@@ -195,8 +177,6 @@ function methodsForFields(
           kind: StructureKind.MethodSignature,
           name: field.name,
           docs: [comment],
-          typeParameters: [aliasTypeParameter],
-          parameters: [aliasParameter],
           returnType: result(output, field.type),
         });
       }
@@ -236,14 +216,13 @@ function methodsForFields(
           kind: StructureKind.MethodSignature,
           name: field.name,
           docs: [comment],
-          typeParameters: [builderTypeParameter, aliasTypeParameter],
+          typeParameters: [builderTypeParameter],
           parameters: [
             {
               name: "args",
               type: argumentType,
             },
             builderArgument,
-            aliasParameter,
           ],
           returnType: result(output, field.type),
         });
@@ -252,8 +231,8 @@ function methodsForFields(
             kind: StructureKind.MethodSignature,
             name: field.name,
             docs: [comment],
-            typeParameters: [builderTypeParameter, aliasTypeParameter],
-            parameters: [builderArgument, aliasParameter],
+            typeParameters: [builderTypeParameter],
+            parameters: [builderArgument],
             returnType: result(output, field.type),
           });
         }
@@ -262,8 +241,8 @@ function methodsForFields(
           kind: StructureKind.MethodSignature,
           name: field.name,
           docs: [comment],
-          typeParameters: [builderTypeParameter, aliasTypeParameter],
-          parameters: [builderArgument, aliasParameter],
+          typeParameters: [builderTypeParameter],
+          parameters: [builderArgument],
           returnType: result(output, field.type),
         });
       }
@@ -317,30 +296,11 @@ function builderFunctionsForInlineFragments(
           type: `(b: Builder_${possibleType}) => Result`,
         },
       ],
-      returnType: `
-        {
-          readonly kind: "inline_fragment";
-          readonly _output: SelectionSetOutput<Result, ${outputPossibleTypes}>;
-          readonly typeCondition: "${possibleType}";
-          readonly possibleTypes: ${outputPossibleTypes};
-        }
-      `,
+      returnType: `InlineFragment<${outputPossibleTypes}, "${possibleType}", SelectionSetOutput<Result, ${outputPossibleTypes}>>`,
     });
   }
 
   return methods;
-}
-
-// function buildObject(obj: Record<string, string>) {
-//   let objCode = "{";
-//   for (const [name, code] of Object.entries(obj)) {
-//     objCode += `readonly ${name}: ${code};\n`;
-//   }
-//   return objCode + "}";
-// }
-
-function generateSelectionSetOutput() {
-  return fs.readFile(path.join(__dirname, "output.ts"), "utf-8");
 }
 
 function printVariableType(type: GraphQLInputType): string {
@@ -427,10 +387,7 @@ function buildOperationBuilder(
             type: `(b: Builder_${name}) => Result`,
           },
         ],
-        returnType: `{
-          document: () => TypedDocumentNode<SelectionSetOutput<Result, "${name}">, {}>;
-          _output: SelectionSetOutput<Result, "${name}">;
-        }`,
+        returnType: `Operation<SelectionSetOutput<Result, "${name}">, never>`,
       },
       {
         typeParameters: [
@@ -463,18 +420,15 @@ function buildOperationBuilder(
               `,
           },
         ],
-        returnType: `{
-          document: () => TypedDocumentNode<SelectionSetOutput<Result, "${name}">, {
-            [K in keyof Variables]: VariableInput<ParseVariableDef<Variables[K]>>;
-          }>;
-          _output: SelectionSetOutput<Result, "${name}">;
-        }`,
+        returnType: `Operation<SelectionSetOutput<Result, "${name}">, {
+          [K in keyof Variables]: VariableInput<ParseVariableDef<Variables[K]>>
+        }>`,
       },
     ],
   };
 }
 
-async function main() {
+export async function generate() {
   const schemaUrl = arg("url");
   const schemaPath = arg("path");
   let schema: GraphQLSchema;
@@ -483,25 +437,22 @@ async function main() {
   } else if (schemaPath) {
     schema = await loadSchemaFromFile(schemaPath);
   } else {
-    throw new Error("Expected --url or --path");
+    console.error("Expected --url or --path");
+    process.exit(1);
   }
 
   const output = arg("output");
   if (!output) {
-    throw new Error("Expected --output");
+    console.error("Expected --output");
+    process.exit(1);
   }
 
   const file = project.createSourceFile(
-    path.join(process.cwd(), output, "types.ts"),
+    path.join(process.cwd(), output, "types.d.ts"),
     undefined,
     {
       overwrite: true,
     }
-  );
-
-  const pathToRuntime = path.relative(
-    path.dirname(path.join(process.cwd(), output, "index.ts")),
-    path.join(process.cwd(), "src", "runtime.ts")
   );
 
   file.addImportDeclaration({
@@ -510,17 +461,18 @@ async function main() {
     isTypeOnly: true,
   });
 
-  file.insertText(file.getEnd(), await generateSelectionSetOutput());
-
-  file.insertText(
-    file.getEnd(),
-    `type FieldOutput<T, Name, Alias extends string | undefined = undefined> = {
-      readonly kind: "field";
-      readonly _output: T;
-      readonly name: Name;
-      readonly _alias: Alias;
-    }`
-  );
+  file.addImportDeclaration({
+    moduleSpecifier: "gqlb",
+    namedImports: [
+      "Field",
+      "InlineFragment",
+      "FragmentDefinition",
+      "Operation",
+      "SelectionSetOutput",
+      "SelectionOutput",
+    ],
+    isTypeOnly: true,
+  });
 
   const statements: StatementStructures[] = [];
 
@@ -741,7 +693,7 @@ async function main() {
           readonly name: T;
           readonly _input: VariableInputObjectTypes[T];
         }
-      : "Unknown variable type";
+      : "Unknown variable type"
     `,
   });
 
@@ -760,7 +712,7 @@ async function main() {
       ? VariableEnumTypes[Name & keyof VariableEnumTypes] | null
       : T extends { readonly kind: "input_object"; readonly name: infer Name }
       ? VariableInputObjectTypes[Name & keyof VariableInputObjectTypes] | null
-      : "Unknown variable type";
+      : "Unknown variable type"
     `,
   });
 
@@ -810,14 +762,7 @@ async function main() {
                 type: `(b: Builder_${type.name}) => Result`,
               },
             ],
-            returnType: `{
-              readonly kind: "fragment_definition";
-              readonly name: Name;
-              readonly _output: SelectionSetOutput<Result, ${possibleTypes}>;
-              readonly typeCondition: "${type}";
-              readonly possibleTypes: ${possibleTypes};
-              document(): TypedDocumentNode<SelectionSetOutput<Result, ${possibleTypes}>, {}>;
-            }`,
+            returnType: `FragmentDefinition<${possibleTypes}, "${type.name}", SelectionSetOutput<Result, ${possibleTypes}>>`,
           };
         }
         return undefined;
@@ -858,6 +803,7 @@ async function main() {
         .map(([k, v]) => `readonly ${k}: ${v}`)
         .join(";\n")}
     }`,
+    isExported: true,
   });
 
   statements.push({
@@ -869,49 +815,45 @@ async function main() {
         name: "T",
       },
     ],
-    type: "T extends { readonly _output: infer Inner } ? Inner : never",
+    type: "T extends Operation<infer Output> ? Output : SelectionOutput<T>",
   });
 
-  file.addStatements(statements);
+  file.addStatements([
+    {
+      kind: StructureKind.Module,
+      name: `"./types"`,
+      hasDeclareKeyword: true,
+      declarationKind: ModuleDeclarationKind.Module,
+      statements,
+    },
+  ]);
 
   const diag = file.getPreEmitDiagnostics();
-  const text = file.getFullText();
+  let text = file.getFullText();
 
-  if (diag.length > 0) {
-    for (const d of diag) {
-      const code = text.slice(d.getStart()!, d.getStart()! + d.getLength()!);
-      console.log(code, " > ", d.getMessageText());
-    }
-  }
-  console.log("Making it pretty!");
+  // if (diag.length > 0) {
+  //   for (const d of diag) {
+  //     const code = text.slice(d.getStart()!, d.getStart()! + d.getLength()!);
+  //     console.log(`${code} > [${d.getLineNumber()}] ${d.getMessageText()}`);
+  //   }
+  //   console.log(`Skipping prettier due to ${diag.length} errors`);
+  // }
 
-  const code = await prettier.format(file.getFullText(), {
+  text = await prettier.format(file.getFullText(), {
     parser: "typescript",
   });
 
   const outputDir = path.join(process.cwd(), output);
 
   await fs.mkdir(outputDir, { recursive: true });
-  await fs.writeFile(path.join(outputDir, "types.d.ts"), code);
-  statements.push({
-    kind: StructureKind.VariableStatement,
-    isExported: true,
-    declarationKind: VariableDeclarationKind.Const,
-    declarations: [
-      {
-        name: "b",
-        initializer: "builderRuntime as any",
-        type: "Builder",
-      },
-    ],
-  });
+  await fs.writeFile(path.join(outputDir, "types.d.ts"), text);
 
   await fs.writeFile(
     path.join(outputDir, "index.ts"),
     await prettier.format(
       `
         import type {Builder} from "./types";
-        import {builder} from "${"./" + pathToRuntime.replace(".ts", "")}"
+        import {builder} from "gqlb"
         export const b = builder as any as Builder;
         export {OutputOf} from "./types";
       `,
@@ -923,5 +865,3 @@ async function main() {
 
   console.log("Done!");
 }
-
-void main();

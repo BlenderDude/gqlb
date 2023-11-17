@@ -71,7 +71,7 @@ const FragmentData: React.FC<{
 
 const UseFragment: React.FC = () => {
   const result = useFragment({
-    fragment: BOT_FRAGMENT.document(),
+    fragment: BOT_FRAGMENT.tdn(),
     fragmentName: BOT_FRAGMENT.name,
     from: {
       __typename: "Bot",

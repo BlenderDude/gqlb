@@ -1,0 +1,171 @@
+import {
+  FragmentDefinitionNode,
+  Kind,
+  OperationDefinitionNode,
+  SelectionSetNode,
+  TypeNode,
+  ValueNode,
+  parse,
+} from "graphql";
+import prettier from "prettier";
+
+function makeScreamingSnakeCase(name: string) {
+  return name
+    .split(/(?=[A-Z])/)
+    .join("_")
+    .toUpperCase();
+}
+
+function printType(type: TypeNode): string {
+  switch (type.kind) {
+    case Kind.NAMED_TYPE:
+      return type.name.value;
+    case Kind.LIST_TYPE:
+      return `[${printType(type.type)}]`;
+    case Kind.NON_NULL_TYPE:
+      return `${printType(type.type)}!`;
+  }
+}
+
+function printValue(value: ValueNode): string {
+  switch (value.kind) {
+    case Kind.INT:
+      return value.value;
+    case Kind.FLOAT:
+      return value.value;
+    case Kind.STRING:
+      return `"${value.value}"`;
+    case Kind.BOOLEAN:
+      return String(value.value);
+    case Kind.NULL:
+      return "null";
+    case Kind.ENUM:
+      return value.value;
+    case Kind.LIST:
+      return `[${value.values.map(printValue).join(", ")}]`;
+    case Kind.OBJECT:
+      return `{${value.fields
+        .map((f) => `${f.name.value}: ${printValue(f.value)}`)
+        .join(", ")}}`;
+    case Kind.VARIABLE:
+      return `v.${value.name.value}`;
+  }
+}
+
+function makeSelections(selectionSet: SelectionSetNode) {
+  const elements: string[] = [];
+  for (const s of selectionSet.selections) {
+    if (s.kind === Kind.FIELD) {
+      if (s.name.value === "__typename") {
+        continue;
+      }
+      const name = s.name.value;
+      const fieldArgs: string[] = [];
+      if (s.arguments && s.arguments.length > 0) {
+        fieldArgs.push(`
+          { ${s.arguments
+            .map((arg) => `${arg.name.value}: ${printValue(arg.value)}`)
+            .join(",\n")} }
+        `);
+      }
+      if (s.selectionSet && s.selectionSet.selections.length > 0) {
+        fieldArgs.push(`b => ${makeSelections(s.selectionSet)}`);
+      }
+      elements.push(`b.${name}(${fieldArgs.join(", ")})`);
+      continue;
+    }
+    if (s.kind === Kind.INLINE_FRAGMENT) {
+      elements.push(
+        `b.__on("${s.typeCondition!.name.value}", b => ${makeSelections(
+          s.selectionSet
+        )})`
+      );
+      continue;
+    }
+    if (s.kind === Kind.FRAGMENT_SPREAD) {
+      elements.push(makeScreamingSnakeCase(s.name.value));
+      continue;
+    }
+  }
+  return `[
+    //
+    ${elements.join(",\n")}
+  ]`;
+}
+
+export async function convert() {
+  console.log("Paste GraphQL query below and press Ctrl+D when done:");
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk);
+  }
+
+  const query = Buffer.concat(chunks).toString();
+  const ast = parse(query, { noLocation: true });
+
+  const results: string[] = [];
+
+  const fragments = ast.definitions.filter(
+    (def) => def.kind === Kind.FRAGMENT_DEFINITION
+  ) as FragmentDefinitionNode[];
+
+  for (const fragment of fragments) {
+    const name = fragment.name.value;
+    const typeCondition = fragment.typeCondition!.name.value;
+    const selections = makeSelections(fragment.selectionSet);
+    results.push(`
+      const ${makeScreamingSnakeCase(
+        name.replace(/Fragment$/, "")
+      )}_FRAGMENT = b.fragment("${name}", "${typeCondition}", b => ${selections});
+    `);
+  }
+
+  const operations = ast.definitions.filter(
+    (def) => def.kind === Kind.OPERATION_DEFINITION
+  ) as OperationDefinitionNode[];
+  if (operations.length > 1) {
+    throw new Error("Only one operation is supported");
+  }
+
+  for (const operation of operations) {
+    const name = operation.name?.value ?? "Unnamed";
+    const operationType = operation.operation;
+    const selections = makeSelections(operation.selectionSet);
+
+    const operationArgs: string[] = [];
+
+    operationArgs.push(`"${name}"`);
+    if (
+      operation.variableDefinitions &&
+      operation.variableDefinitions.length > 0
+    ) {
+      operationArgs.push(
+        `{ ${operation.variableDefinitions
+          .map((v) => `${v.variable.name.value}: "${printType(v.type)}"`)
+          .join(", ")} }`
+      );
+      operationArgs.push(`(b, v) => ${selections}`);
+    } else {
+      operationArgs.push(`(b) => ${selections}`);
+    }
+
+    results.push(`
+      const ${makeScreamingSnakeCase(
+        name.replace(/Fragment$/, "")
+      )}_QUERY = b.${operationType}(${operationArgs.join(", ")});
+    `);
+  }
+
+  const code = await prettier.format(results.join("\n\n"), {
+    parser: "typescript",
+  });
+
+  console.log("==== Output ====\n");
+
+  console.log(code);
+
+  console.log("\n==== End Output ====");
+  await import("clipboardy").then((c) => c.default.write(code));
+  console.log("Copied to clipboard!");
+}

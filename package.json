@@ -1,20 +1,26 @@
 {
-  "name": "query-gen-test-4",
-  "version": "1.0.0",
+  "name": "gqlb",
+  "version": "0.0.1",
   "description": "",
-  "main": "index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "gqlb": "./dist/bin/gqlb.js"
+  },
   "scripts": {
-    "generate": "ts-node ./src/codegen",
+    "gqlb": "ts-node ./src/bin/gqlb",
     "generate:github": "npm run generate -- --path=examples/github/schema.graphql --output=examples/github/generated",
     "generate:countries": "npm run generate -- --url=https://countries.trevorblades.com --output=examples/countries/generated",
-    "run:github": "ts-node ./examples/github/index.ts",
-    "run:countries": "ts-node ./examples/countries/index.ts"
+    "run:github": "ts-node --project ./tsconfig.examples.json ./examples/github/index.ts",
+    "run:countries": "ts-node --project ./tsconfig.examples.json ./examples/countries/index.ts",
+    "build": "rm -rf dist && tsc",
+    "prepack": "npm run build"
   },
   "keywords": [],
-  "author": "",
+  "author": "Daniel Abdelsamed <daniel@abdelsamed.com>",
   "license": "ISC",
   "devDependencies": {
-    "@graphql-typed-document-node/core": "^3.2.0",
+    "@apollo/client": "^3.8.7",
     "@types/node": "^20.8.10",
     "@types/react": "^18.2.37",
     "@typescript/analyze-trace": "^0.10.1",
@@ -23,10 +29,14 @@
     "typescript": "^5.2.2"
   },
   "dependencies": {
-    "@apollo/client": "^3.8.7",
+    "@graphql-typed-document-node/core": "^3.2",
+    "clipboardy": "^4.0.0",
     "graphql": "^16.8.1",
     "graphql-request": "^6.1.0",
     "prettier": "^3.0.3",
     "ts-morph": "^20.0.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
   }
 }

@@ -1,6 +1,7 @@
 import { OutputOf, b } from "./generated";
 import { print } from "graphql";
 import request from "graphql-request";
+import { ResponseKey } from "../../src/helpers";
 
 const subFragment = b.fragment("SubFragment", "Country", (b) => [
   //
@@ -15,26 +16,25 @@ const frag = b.fragment("Countries", "Country", (b) => [
 
 type CountryOutput = OutputOf<typeof frag>;
 
-const res = b.query("CountriesQuery", { code: "ID!" }, (b, v) => [
-  //
-  b.country({ code: v.code }, (b) => [
-    //
-    frag,
-    b.__on("Country", (b) => [
+const res = b.query("CountriesQuery", { code: "ID!" }, (b, v) => {
+  return [
+    b.country({ code: v.code }, (b) => [
       //
-      b.emoji(),
+      frag,
+      b.__on("Country", (b) => [
+        //
+        b.emoji(),
+      ]),
+      b.awsRegion(),
     ]),
-    b.awsRegion(),
-  ]),
-  b.country(
-    { code: "US" },
-    (b) => [
-      //
-      b.name(),
-    ],
-    "unitedStates"
-  ),
-]);
+    b
+      .country({ code: "US" }, (b) => [
+        //
+        b.name(),
+      ])
+      .alias("unitedStates"),
+  ];
+});
 
 async function main() {
   const document = res.document();
