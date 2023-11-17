@@ -1,4 +1,5 @@
 import {
+  DocumentNode,
   FragmentDefinitionNode,
   Kind,
   OperationDefinitionNode,
@@ -93,12 +94,62 @@ function makeSelections(selectionSet: SelectionSetNode) {
   ]`;
 }
 
+function getFragmentNames(selectionSet: SelectionSetNode): Set<string> {
+  const fragments = new Set<string>();
+  for (const s of selectionSet.selections) {
+    if (s.kind === Kind.FRAGMENT_SPREAD) {
+      fragments.add(s.name.value);
+    }
+    if (
+      (s.kind === Kind.FIELD || s.kind === Kind.INLINE_FRAGMENT) &&
+      s.selectionSet
+    ) {
+      for (const f of getFragmentNames(s.selectionSet)) {
+        fragments.add(f);
+      }
+    }
+  }
+  return fragments;
+}
+
+function isValidDocument(str: string) {
+  try {
+    const doc = parse(str);
+    const fragments = new Set<string>();
+    const requiredFragments = new Set<string>();
+    for (const def of doc.definitions) {
+      if (def.kind === Kind.FRAGMENT_DEFINITION) {
+        fragments.add(def.name.value);
+        for (const f of getFragmentNames(def.selectionSet)) {
+          requiredFragments.add(f);
+        }
+      }
+      if (def.kind === Kind.OPERATION_DEFINITION) {
+        for (const f of getFragmentNames(def.selectionSet)) {
+          requiredFragments.add(f);
+        }
+      }
+    }
+    for (const rf of requiredFragments) {
+      if (!fragments.has(rf)) {
+        return false;
+      }
+    }
+    return doc.definitions.some((d) => d.kind === Kind.OPERATION_DEFINITION);
+  } catch {
+    return false;
+  }
+}
+
 export async function convert() {
   console.log("Paste GraphQL query below and press Ctrl+D when done:");
 
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) {
     chunks.push(chunk);
+    if (isValidDocument(Buffer.concat(chunks).toString())) {
+      break;
+    }
   }
 
   const query = Buffer.concat(chunks).toString();
@@ -152,8 +203,10 @@ export async function convert() {
 
     results.push(`
       const ${makeScreamingSnakeCase(
-        name.replace(/Fragment$/, "")
-      )}_QUERY = b.${operationType}(${operationArgs.join(", ")});
+        name.replace(/(Query|Mutation|Subscription)$/, "")
+      )}_${operationType.toUpperCase()} = b.${operationType}(${operationArgs.join(
+        ", "
+      )});
     `);
   }
 
