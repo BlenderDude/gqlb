@@ -251,7 +251,11 @@ export class FragmentDefinition<
   }
 
   tdn(): TypedDocumentNode<Output, any> {
-    return this.definition() as any;
+    const fragments = [...this.subFragments().values()];
+    return {
+      kind: "Document" as Kind.DOCUMENT,
+      definitions: [...fragments.map((f) => f.definition())],
+    };
   }
 
   document(): FragmentSpreadNode {

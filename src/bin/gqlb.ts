@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { convert } from "./commands/convert";
 import { generate } from "./commands/generate";
 

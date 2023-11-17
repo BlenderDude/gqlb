@@ -9,6 +9,7 @@ import {
   parse,
 } from "graphql";
 import prettier from "prettier";
+import { loadConfig } from "../helpers/config";
 
 function makeScreamingSnakeCase(name: string) {
   return name
@@ -53,7 +54,10 @@ function printValue(value: ValueNode): string {
   }
 }
 
-function makeSelections(selectionSet: SelectionSetNode) {
+function makeSelections(
+  selectionSet: SelectionSetNode,
+  formatComment: boolean
+) {
   const elements: string[] = [];
   for (const s of selectionSet.selections) {
     if (s.kind === Kind.FIELD) {
@@ -70,15 +74,20 @@ function makeSelections(selectionSet: SelectionSetNode) {
         `);
       }
       if (s.selectionSet && s.selectionSet.selections.length > 0) {
-        fieldArgs.push(`b => ${makeSelections(s.selectionSet)}`);
+        fieldArgs.push(`b => ${makeSelections(s.selectionSet, formatComment)}`);
       }
-      elements.push(`b.${name}(${fieldArgs.join(", ")})`);
+      let alias;
+      if (s.alias) {
+        alias = `.alias("${s.alias.value}")`;
+      }
+      elements.push(`b.${name}(${fieldArgs.join(", ")})${alias}`);
       continue;
     }
     if (s.kind === Kind.INLINE_FRAGMENT) {
       elements.push(
         `b.__on("${s.typeCondition!.name.value}", b => ${makeSelections(
-          s.selectionSet
+          s.selectionSet,
+          formatComment
         )})`
       );
       continue;
@@ -89,7 +98,7 @@ function makeSelections(selectionSet: SelectionSetNode) {
     }
   }
   return `[
-    //
+    ${formatComment ? "//" : ""}
     ${elements.join(",\n")}
   ]`;
 }
@@ -142,6 +151,7 @@ function isValidDocument(str: string) {
 }
 
 export async function convert() {
+  const config = await loadConfig();
   console.log("Paste GraphQL query below and press Ctrl+D when done:");
 
   const chunks: Buffer[] = [];
@@ -164,7 +174,10 @@ export async function convert() {
   for (const fragment of fragments) {
     const name = fragment.name.value;
     const typeCondition = fragment.typeCondition!.name.value;
-    const selections = makeSelections(fragment.selectionSet);
+    const selections = makeSelections(
+      fragment.selectionSet,
+      config.convert?.formatComment ?? true
+    );
     results.push(`
       const ${makeScreamingSnakeCase(
         name.replace(/Fragment$/, "")
@@ -182,7 +195,10 @@ export async function convert() {
   for (const operation of operations) {
     const name = operation.name?.value ?? "Unnamed";
     const operationType = operation.operation;
-    const selections = makeSelections(operation.selectionSet);
+    const selections = makeSelections(
+      operation.selectionSet,
+      config.convert?.formatComment ?? true
+    );
 
     const operationArgs: string[] = [];
 

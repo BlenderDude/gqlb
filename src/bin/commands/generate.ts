@@ -37,7 +37,8 @@ import {
   VariableDeclarationKind,
   ts,
 } from "ts-morph";
-import { arg } from "../helpers/arg";
+import { loadConfig, schema } from "../helpers/config";
+import { z } from "zod";
 
 function resolveToRootType(type: GraphQLType) {
   if (type instanceof GraphQLList || type instanceof GraphQLNonNull) {
@@ -428,24 +429,18 @@ function buildOperationBuilder(
   };
 }
 
-export async function generate() {
-  const schemaUrl = arg("url");
-  const schemaPath = arg("path");
+async function generateForSchema(
+  name: string,
+  config: z.output<typeof schema>["generate"][string]
+) {
   let schema: GraphQLSchema;
-  if (schemaUrl) {
-    schema = await loadSchemaFromUrl(schemaUrl);
-  } else if (schemaPath) {
-    schema = await loadSchemaFromFile(schemaPath);
+  if ("introspect" in config.schema) {
+    schema = await loadSchemaFromUrl(config.schema.introspect);
   } else {
-    console.error("Expected --url or --path");
-    process.exit(1);
+    schema = await loadSchemaFromFile(config.schema.sdl);
   }
 
-  const output = arg("output");
-  if (!output) {
-    console.error("Expected --output");
-    process.exit(1);
-  }
+  const { output } = config;
 
   const file = project.createSourceFile(
     path.join(process.cwd(), output, "types.d.ts"),
@@ -481,18 +476,7 @@ export async function generate() {
   );
 
   console.log(`Parsing ${typeEntries.length} types...`);
-  let completed = 0;
-
   for (const [name, type] of typeEntries) {
-    completed++;
-    console.log(
-      `${completed
-        .toString()
-        .padStart(Math.ceil(Math.log10(typeEntries.length)), "0")}/${
-        typeEntries.length
-      } Parsing type ${name} `
-    );
-
     if (
       type instanceof GraphQLObjectType ||
       type instanceof GraphQLInterfaceType
@@ -594,13 +578,14 @@ export async function generate() {
         })),
       });
     } else if (type instanceof GraphQLScalarType) {
-      // TODO make this more generic
+      const { scalarTypes } = config;
       const baseTypes: Record<string, string> = {
         String: "string",
         Int: "number",
         Float: "number",
         Boolean: "boolean",
         ID: "string | number",
+        ...scalarTypes,
       };
       statements.push({
         kind: StructureKind.Interface,
@@ -622,6 +607,7 @@ export async function generate() {
       });
     }
   }
+  console.log(`Parsed ${typeEntries.length} types successfully`);
 
   statements.push({
     kind: StructureKind.TypeAlias,
@@ -852,16 +838,23 @@ export async function generate() {
     path.join(outputDir, "index.ts"),
     await prettier.format(
       `
+        /* eslint-disable */
         import type {Builder} from "./types";
         import {builder} from "gqlb"
         export const b = builder as any as Builder;
-        export {OutputOf} from "./types";
+        export type {OutputOf} from "./types";
       `,
       {
         parser: "typescript",
       }
     )
   );
+}
 
-  console.log("Done!");
+export async function generate() {
+  const { generate } = await loadConfig();
+  for (const [name, config] of Object.entries(generate)) {
+    console.log(`Generating types for ${name}...`);
+    await generateForSchema(name, config);
+  }
 }
