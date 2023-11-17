@@ -84,7 +84,7 @@ function makeSelections(selectionSet: SelectionSetNode) {
       continue;
     }
     if (s.kind === Kind.FRAGMENT_SPREAD) {
-      elements.push(makeScreamingSnakeCase(s.name.value));
+      elements.push(makeScreamingSnakeCase(s.name.value) + "_FRAGMENT");
       continue;
     }
   }
