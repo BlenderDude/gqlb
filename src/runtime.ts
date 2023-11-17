@@ -43,7 +43,7 @@ type BuilderObject = {
 function makeValueNode(value: unknown): ValueNode {
   if (value === null) {
     return {
-      kind: "Null" as Kind.NULL,
+      kind: "NullValue" as Kind.NULL,
     };
   }
   if (typeof value === "string") {
