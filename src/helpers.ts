@@ -1,4 +1,11 @@
-import { Field, FragmentDefinition, InlineFragment } from "./runtime";
+import {
+  Field,
+  FragmentDefinition,
+  FragmentDefinitionWithVariables as FragmentDefinitionWithVariables,
+  InlineFragment,
+  FragmentSpread,
+  Operation,
+} from "./runtime";
 
 export type ResponseKey<F extends Field> = F extends Field<
   infer Name,
@@ -25,14 +32,27 @@ export type SelectionOutput<T> = T extends Field<any, any, infer O>
   ? O
   : T extends FragmentDefinition<any, any, infer O>
   ? O
+  : T extends FragmentDefinitionWithVariables<any, any, any, infer O>
+  ? O
+  : T extends FragmentSpread<infer F>
+  ? SelectionOutput<F>
   : never;
 
-export type SelectionSetSelection = Field | InlineFragment | FragmentDefinition;
+export type SelectionSetSelection<PossibleTypes extends string = string> =
+  | Field
+  | InlineFragment<PossibleTypes>
+  | FragmentSpread<
+      | FragmentDefinition<PossibleTypes>
+      | FragmentDefinitionWithVariables<PossibleTypes>
+    >;
 
 export type NeverToEmptyObj<T> = [T] extends [never] ? {} : T;
 
 export type FragmentOutput<
-  T extends InlineFragment | FragmentDefinition,
+  T extends
+    | InlineFragment
+    | FragmentDefinition
+    | FragmentDefinitionWithVariables,
   PT extends string,
 > = NeverToEmptyObj<Extract<SelectionOutput<T>, { readonly __typename: PT }>>;
 
@@ -52,7 +72,11 @@ export type BuildSelectionSet<
         PT,
         Acc & ResponseKeyObj<Head, SelectionOutput<Head>>
       >
-    : Head extends InlineFragment | FragmentDefinition
+    : Head extends FragmentSpread<
+        infer F extends FragmentDefinition | FragmentDefinitionWithVariables
+      >
+    ? BuildSelectionSet<Tail, PT, Acc & FragmentOutput<F, PT>>
+    : Head extends InlineFragment
     ? BuildSelectionSet<Tail, PT, Acc & FragmentOutput<Head, PT>>
     : never
   : Acc;
@@ -62,4 +86,11 @@ export type SelectionSetOutput<
   PossibleTypes extends string,
 > = PossibleTypes extends infer PT
   ? ReadonlyIntersectionCollapse<BuildSelectionSet<T, PT & string>>
+  : never;
+
+export type OutputOf<T> = T extends Operation<infer Output>
+  ? Output
+  : SelectionOutput<T>;
+export type VariablesOf<T> = T extends Operation<any, infer Variables>
+  ? Variables
   : never;

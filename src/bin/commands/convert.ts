@@ -93,7 +93,9 @@ function makeSelections(
       continue;
     }
     if (s.kind === Kind.FRAGMENT_SPREAD) {
-      elements.push(makeScreamingSnakeCase(s.name.value) + "_FRAGMENT");
+      elements.push(
+        `b.__fragment(${makeScreamingSnakeCase(s.name.value) + "_FRAGMENT"})`
+      );
       continue;
     }
   }

@@ -1,4 +1,4 @@
-import { TypedDocumentNode } from "@graphql-typed-document-node/core";
+import type { TypedDocumentNode } from "@graphql-typed-document-node/core";
 import {
   parseType,
   type ArgumentNode,
@@ -7,13 +7,13 @@ import {
   type FragmentSpreadNode,
   type InlineFragmentNode,
   type Kind,
-  type OperationDefinitionNode,
   type OperationTypeNode,
   type VariableDefinitionNode,
   type VariableNode,
   ValueNode,
   SelectionSetNode,
   SelectionNode,
+  print,
 } from "graphql";
 import { SelectionSetSelection } from "./helpers";
 
@@ -34,11 +34,78 @@ type BuilderObject_Inline = (
   builder: Field_BuilderArg
 ) => InlineFragment;
 
+type BuilderObject_Fragment = (
+  fragment: FragmentDefinition | FragmentDefinitionWithVariables,
+  variables?: Record<
+    string,
+    {
+      [variableSymbol]: VariableNode;
+    }
+  >
+) => FragmentDefinition | FragmentDefinitionWithVariables;
+
 type BuilderObject = {
   [fieldName: string]: BuilderObject_Field;
 } & {
   __on: BuilderObject_Inline;
+  __fragment: BuilderObject_Fragment;
 };
+
+class FragmentMap extends Map<
+  string,
+  FragmentDefinition | FragmentDefinitionWithVariables
+> {
+  constructor() {
+    super();
+  }
+
+  set(
+    name: string,
+    fragment: FragmentDefinition | FragmentDefinitionWithVariables
+  ) {
+    const existing = this.get(name);
+
+    if (
+      existing?.name === fragment.name &&
+      fragment instanceof FragmentDefinitionWithVariables &&
+      existing instanceof FragmentDefinitionWithVariables
+    ) {
+      const variables = new Set<string>(
+        Object.values(fragment["variables"]).map(
+          (v) => v[variableSymbol].name.value
+        )
+      );
+      for (const v of Object.values(existing["variables"]).map(
+        (v) => v[variableSymbol].name.value
+      )) {
+        if (!variables.has(v)) {
+          throw new Error(
+            `Fragment with name ${fragment.name} already exists with different variables`
+          );
+        }
+        variables.delete(v);
+      }
+      if (variables.size > 0) {
+        throw new Error(
+          `Fragment with name ${fragment.name} already exists with different variables`
+        );
+      }
+    } else if (
+      existing &&
+      JSON.stringify(existing) !== JSON.stringify(fragment)
+    ) {
+      const lines = [
+        `Fragment with name ${fragment.name} already exists with a different structure:`,
+        `Existing:\n${print(existing.definition())}`,
+        `Incoming:\n${print(fragment.definition())}`,
+      ];
+      throw new Error(lines.join("\n"));
+    }
+
+    super.set(fragment.name, fragment);
+    return this;
+  }
+}
 
 function makeValueNode(value: unknown): ValueNode {
   if (value === null) {
@@ -90,7 +157,7 @@ function makeValueNode(value: unknown): ValueNode {
 }
 
 abstract class Selection {
-  abstract subFragments(): Map<string, FragmentDefinition<any, any, any>>;
+  abstract subFragments(): FragmentMap;
 
   createSelectionSet(
     selections: ReadonlyArray<SelectionSetSelection>
@@ -104,7 +171,17 @@ abstract class Selection {
         },
       },
     ];
-    nodes.push(...selections.map((s) => s.document()));
+    nodes.push(
+      ...selections.map((s) => {
+        if (
+          s instanceof FragmentDefinition ||
+          s instanceof FragmentDefinitionWithVariables
+        ) {
+          return s.spread();
+        }
+        return s.document();
+      })
+    );
 
     return {
       kind: "SelectionSet" as Kind.SELECTION_SET,
@@ -129,11 +206,11 @@ export class Field<
     super();
   }
 
-  subFragments(): Map<string, FragmentDefinition<any, any, any>> {
-    const map = new Map<string, FragmentDefinition<any, any, any>>();
+  subFragments(): FragmentMap {
+    const map = new FragmentMap();
     for (const selection of this.selections ?? []) {
-      for (const fragment of selection.subFragments()) {
-        map.set(fragment[0], fragment[1]);
+      for (const [name, fragment] of selection.subFragments()) {
+        map.set(name, fragment);
       }
     }
     return map;
@@ -171,7 +248,7 @@ export class InlineFragment<
   const Output = any,
 > extends Selection {
   private readonly _output!: Output;
-  private readonly _possibleTypes!: PossibleTypes;
+  public readonly _possibleTypes!: PossibleTypes;
 
   constructor(
     public readonly typeCondition: TypeCondition,
@@ -180,11 +257,11 @@ export class InlineFragment<
     super();
   }
 
-  subFragments(): Map<string, FragmentDefinition<any, any, any>> {
-    const map = new Map<string, FragmentDefinition<any, any, any>>();
+  subFragments(): FragmentMap {
+    const map = new FragmentMap();
     for (const selection of this.selections) {
-      for (const fragment of selection.subFragments()) {
-        map.set(fragment[0], fragment[1]);
+      for (const [name, fragment] of selection.subFragments()) {
+        map.set(name, fragment);
       }
     }
     return map;
@@ -211,7 +288,7 @@ export class FragmentDefinition<
   const Output = any,
 > extends Selection {
   private readonly _output!: Output;
-  private readonly _possibleTypes!: PossibleTypes;
+  public readonly _possibleTypes!: PossibleTypes;
 
   constructor(
     public readonly name: string,
@@ -221,12 +298,12 @@ export class FragmentDefinition<
     super();
   }
 
-  subFragments(): Map<string, FragmentDefinition<any, any, any>> {
-    const map = new Map<string, FragmentDefinition<any, any, any>>();
+  subFragments(): FragmentMap {
+    const map = new FragmentMap();
     map.set(this.name, this);
     for (const selection of this.selections) {
-      for (const fragment of selection.subFragments()) {
-        map.set(fragment[0], fragment[1]);
+      for (const [name, fragment] of selection.subFragments()) {
+        map.set(name, fragment);
       }
     }
     return map;
@@ -250,7 +327,7 @@ export class FragmentDefinition<
     };
   }
 
-  tdn(): TypedDocumentNode<Output, any> {
+  document(): TypedDocumentNode<Output, any> {
     const fragments = [...this.subFragments().values()];
     return {
       kind: "Document" as Kind.DOCUMENT,
@@ -258,7 +335,7 @@ export class FragmentDefinition<
     };
   }
 
-  document(): FragmentSpreadNode {
+  spread(): FragmentSpreadNode {
     return {
       kind: "FragmentSpread" as Kind.FRAGMENT_SPREAD,
       name: {
@@ -269,25 +346,197 @@ export class FragmentDefinition<
   }
 }
 
+export class FragmentDefinitionWithVariables<
+  const PossibleTypes extends string = any,
+  const TypeCondition extends string = any,
+  const Variables = any,
+  const Output = any,
+  const VariableInput = any,
+> extends Selection {
+  _variables!: Variables;
+  private readonly _output!: Output;
+  public readonly _possibleTypes!: PossibleTypes;
+
+  constructor(
+    public readonly name: string,
+    public readonly typeCondition: TypeCondition,
+    private variables: Record<
+      keyof Variables,
+      {
+        [variableSymbol]: VariableNode;
+      }
+    >,
+    private builder: (
+      variables: Record<
+        string,
+        {
+          [variableSymbol]: VariableNode;
+        }
+      >
+    ) => ReadonlyArray<SelectionSetSelection>
+  ) {
+    super();
+  }
+
+  setVariables(
+    variables: Record<
+      string,
+      {
+        [variableSymbol]: VariableNode;
+      }
+    >
+  ): FragmentDefinitionWithVariables {
+    const variablesAreEqual = Object.entries(this.variables).every(
+      ([name, variable]) => {
+        const otherVariable = variables[name];
+        if (!otherVariable) {
+          return false;
+        }
+        return (
+          otherVariable[variableSymbol].name.value ===
+          (
+            variable as {
+              [variableSymbol]: VariableNode;
+            }
+          )[variableSymbol].name.value
+        );
+      }
+    );
+    if (variablesAreEqual) {
+      return this;
+    }
+    return new FragmentDefinitionWithVariables(
+      this.name,
+      this.typeCondition,
+      Object.fromEntries(
+        Object.entries(variables).map(([name, variable]) => {
+          return [name, variable];
+        })
+      ),
+      this.builder
+    );
+  }
+
+  subFragments(): FragmentMap {
+    const map = new FragmentMap();
+    map.set(this.name, this);
+    for (const selection of this.builder(this.variables)) {
+      for (const [name, fragment] of selection.subFragments()) {
+        map.set(name, fragment);
+      }
+    }
+    return map;
+  }
+
+  definition(
+    variableNameOverride: Record<string, string> = {}
+  ): FragmentDefinitionNode {
+    const variables = {
+      ...this.variables,
+      ...Object.fromEntries(
+        Object.entries(variableNameOverride).map(([name, newName]) => {
+          return [
+            newName,
+            {
+              [variableSymbol]: {
+                kind: "Variable" as Kind.VARIABLE,
+                name: {
+                  kind: "Name" as Kind.NAME,
+                  value: name,
+                },
+              },
+            },
+          ];
+        })
+      ),
+    };
+    return {
+      kind: "FragmentDefinition" as Kind.FRAGMENT_DEFINITION,
+      name: {
+        kind: "Name" as Kind.NAME,
+        value: this.name,
+      },
+      typeCondition: {
+        kind: "NamedType" as Kind.NAMED_TYPE,
+        name: {
+          kind: "Name" as Kind.NAME,
+          value: this.typeCondition,
+        },
+      },
+      selectionSet: this.createSelectionSet(this.builder(variables))!,
+    };
+  }
+
+  document(): TypedDocumentNode<Output, VariableInput> {
+    const fragments = [...this.subFragments().values()];
+    return {
+      kind: "Document" as Kind.DOCUMENT,
+      definitions: [...fragments.map((f) => f.definition())],
+    };
+  }
+
+  spread(): FragmentSpreadNode {
+    return {
+      kind: "FragmentSpread" as Kind.FRAGMENT_SPREAD,
+      name: {
+        kind: "Name" as Kind.NAME,
+        value: this.name,
+      },
+    };
+  }
+}
+
+export class FragmentSpread<
+  F extends FragmentDefinition | FragmentDefinitionWithVariables,
+> extends Selection {
+  constructor(public readonly def: F) {
+    super();
+  }
+
+  subFragments(): FragmentMap {
+    return this.def.subFragments();
+  }
+
+  document(): FragmentSpreadNode {
+    return {
+      kind: "FragmentSpread" as Kind.FRAGMENT_SPREAD,
+      name: {
+        kind: "Name" as Kind.NAME,
+        value: this.def.name,
+      },
+    };
+  }
+}
+
 export class Operation<const Output = any, const Variables = any> {
   constructor(
     public readonly name: string,
     public readonly type: "query" | "mutation" | "subscription",
     public readonly variableDefinitions: ReadonlyArray<VariableDefinitionNode>,
-    public readonly selectionSet: ReadonlyArray<SelectionSetSelection>
+    public readonly selections: ReadonlyArray<SelectionSetSelection>
   ) {}
 
   document(): TypedDocumentNode<Output, Variables> {
-    const fragments: FragmentDefinitionNode[] = [];
-    for (const selection of this.selectionSet) {
+    const fragments = new FragmentMap();
+    const variables = Object.fromEntries(
+      this.variableDefinitions.map((def) => {
+        return [
+          def.variable.name.value,
+          {
+            [variableSymbol]: def.variable,
+          },
+        ];
+      })
+    );
+    for (const selection of this.selections) {
       for (const fragment of selection.subFragments().values()) {
-        fragments.push(fragment.definition());
+        fragments.set(fragment.name, fragment);
       }
     }
     return {
       kind: "Document" as Kind.DOCUMENT,
       definitions: [
-        ...fragments,
+        ...Array.from(fragments.values()).map((f) => f.definition()),
         {
           kind: "OperationDefinition" as Kind.OPERATION_DEFINITION,
           name: {
@@ -298,7 +547,15 @@ export class Operation<const Output = any, const Variables = any> {
           variableDefinitions: this.variableDefinitions,
           selectionSet: {
             kind: "SelectionSet" as Kind.SELECTION_SET,
-            selections: this.selectionSet.map((s) => s.document()),
+            selections: this.selections.map((s) => {
+              if (
+                s instanceof FragmentDefinition ||
+                s instanceof FragmentDefinitionWithVariables
+              ) {
+                return s.spread();
+              }
+              return s.document();
+            }),
           },
         },
       ],
@@ -315,6 +572,18 @@ function makeBuilderObject(): BuilderObject {
           const builder: BuilderObject_Inline = (typeCondition, builder) => {
             const selections = builder(makeBuilderObject());
             return new InlineFragment(typeCondition, selections);
+          };
+          return builder;
+        }
+        if (prop === "__fragment") {
+          const builder: BuilderObject_Fragment = (fragment, variables) => {
+            if (
+              fragment instanceof FragmentDefinitionWithVariables &&
+              variables
+            ) {
+              return fragment.setVariables(variables);
+            }
+            return fragment;
           };
           return builder;
         }
@@ -411,13 +680,63 @@ function makeOperationBuilder(type: OperationTypeNode) {
   };
 }
 
+type Fragment_BuilderArg = (
+  b: BuilderObject,
+  v?: Record<
+    string,
+    {
+      [variableSymbol]: VariableNode;
+    }
+  >
+) => ReadonlyArray<SelectionSetSelection>;
+type Fragment_VariablesArg = Record<string, string>;
+
 function makeFragmentBuilder() {
   return function (
     name: string,
     typeCondition: string,
-    builder: (b: BuilderObject) => ReadonlyArray<SelectionSetSelection>
-  ): FragmentDefinition {
-    const selections = builder(makeBuilderObject());
+    arg3: Fragment_BuilderArg | Fragment_VariablesArg,
+    arg4?: Fragment_BuilderArg
+  ): FragmentDefinition | FragmentDefinitionWithVariables {
+    let builder: Fragment_BuilderArg;
+    let variables:
+      | Record<
+          string,
+          {
+            [variableSymbol]: VariableNode;
+          }
+        >
+      | undefined = undefined;
+    if (typeof arg3 === "object") {
+      variables = Object.fromEntries(
+        Object.keys(arg3).map((name) => {
+          return [
+            name,
+            {
+              [variableSymbol]: {
+                kind: "Variable" as Kind.VARIABLE,
+                name: {
+                  kind: "Name" as Kind.NAME,
+                  value: name,
+                },
+              },
+            },
+          ];
+        })
+      );
+      builder = arg4!;
+    } else {
+      builder = arg3;
+    }
+    if (variables) {
+      return new FragmentDefinitionWithVariables(
+        name,
+        typeCondition,
+        variables,
+        (v) => builder(makeBuilderObject(), v)
+      );
+    }
+    const selections = builder(makeBuilderObject(), variables);
     return new FragmentDefinition(name, typeCondition, selections);
   };
 }

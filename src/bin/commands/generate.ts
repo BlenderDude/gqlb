@@ -23,22 +23,18 @@ import path from "path";
 import prettier from "prettier";
 import {
   CallSignatureDeclarationStructure,
-  ExpressionStatement,
   InterfaceDeclarationStructure,
   JSDocStructure,
   MethodSignatureStructure,
   ModuleDeclarationKind,
   ParameterDeclarationStructure,
   Project,
-  PropertySignatureStructure,
   StatementStructures,
   StructureKind,
   TypeParameterDeclarationStructure,
-  VariableDeclarationKind,
-  ts,
 } from "ts-morph";
-import { loadConfig, schema } from "../helpers/config";
 import { z } from "zod";
+import { loadConfig, schema } from "../helpers/config";
 
 function resolveToRootType(type: GraphQLType) {
   if (type instanceof GraphQLList || type instanceof GraphQLNonNull) {
@@ -190,7 +186,7 @@ function methodsForFields(
       const builderTypeParameter: TypeParameterDeclarationStructure = {
         kind: StructureKind.TypeParameter,
         name: "BuilderResult",
-        constraint: "readonly [any, ...any[]]",
+        constraint: makeSelectionResult(`PossibleTypes_${rootType.name}`),
         isConst: true,
       };
 
@@ -283,7 +279,7 @@ function builderFunctionsForInlineFragments(
       typeParameters: [
         {
           name: "Result",
-          constraint: "readonly [any, ...any[]]",
+          constraint: makeSelectionResult(`PossibleTypes_${possibleType}`),
           isConst: true,
         },
       ],
@@ -298,6 +294,44 @@ function builderFunctionsForInlineFragments(
         },
       ],
       returnType: `InlineFragment<${outputPossibleTypes}, "${possibleType}", SelectionSetOutput<Result, ${outputPossibleTypes}>>`,
+    });
+    methods.push({
+      kind: StructureKind.MethodSignature,
+      name: "__fragment",
+      typeParameters: [
+        {
+          name: "Fragment",
+          constraint: "FragmentDefinition<any, any, any>",
+        },
+      ],
+      parameters: [
+        {
+          name: "fragment",
+          type: "Fragment",
+        },
+      ],
+      returnType: `FragmentSpread<Fragment>`,
+    });
+    methods.push({
+      kind: StructureKind.MethodSignature,
+      name: "__fragment",
+      typeParameters: [
+        {
+          name: "Fragment",
+          constraint: "FragmentDefinitionWithVariables<any, any, any>",
+        },
+      ],
+      parameters: [
+        {
+          name: "fragment",
+          type: "Fragment",
+        },
+        {
+          name: "variables",
+          type: "Fragment extends FragmentDefinitionWithVariables<any, any, infer V, any> ? V : never",
+        },
+      ],
+      returnType: `FragmentSpread<Fragment>`,
     });
   }
 
@@ -362,10 +396,15 @@ function variableUnion(type: GraphQLInputType): string {
   return union.join(" | ");
 }
 
+function makeSelectionResult(possibleTypes: string) {
+  return `ReadonlyArray<SelectionSetSelection<${possibleTypes}>>`;
+}
+
 function buildOperationBuilder(
   type: GraphQLObjectType
 ): InterfaceDeclarationStructure {
   const { name } = type;
+  const selectionSetResult = makeSelectionResult(`PossibleTypes_${name}`);
   return {
     kind: StructureKind.Interface,
     name: "Builder_Operation_" + name,
@@ -374,7 +413,7 @@ function buildOperationBuilder(
         typeParameters: [
           {
             name: "Result",
-            constraint: "readonly [any, ...any[]]",
+            constraint: selectionSetResult,
             isConst: true,
           },
         ],
@@ -388,13 +427,13 @@ function buildOperationBuilder(
             type: `(b: Builder_${name}) => Result`,
           },
         ],
-        returnType: `Operation<SelectionSetOutput<Result, "${name}">, never>`,
+        returnType: `Operation<SelectionSetOutput<Result, "${name}">, {}>`,
       },
       {
         typeParameters: [
           {
             name: "Result",
-            constraint: "readonly [any, ...any[]]",
+            constraint: selectionSetResult,
             isConst: true,
           },
           {
@@ -451,20 +490,17 @@ async function generateForSchema(
   );
 
   file.addImportDeclaration({
-    moduleSpecifier: "@graphql-typed-document-node/core",
-    namedImports: ["TypedDocumentNode"],
-    isTypeOnly: true,
-  });
-
-  file.addImportDeclaration({
     moduleSpecifier: "gqlb",
     namedImports: [
       "Field",
       "InlineFragment",
+      "FragmentSpread",
       "FragmentDefinition",
+      "FragmentDefinitionWithVariables",
       "Operation",
       "SelectionSetOutput",
       "SelectionOutput",
+      "SelectionSetSelection",
     ],
     isTypeOnly: true,
   });
@@ -686,6 +722,7 @@ async function generateForSchema(
   statements.push({
     kind: StructureKind.TypeAlias,
     name: "VariableInput",
+    isExported: true,
     typeParameters: [{ name: "T" }],
     type: `
       T extends { readonly kind: "non_null"; readonly inner: infer Inner }
@@ -702,16 +739,30 @@ async function generateForSchema(
     `,
   });
 
+  statements.push({
+    kind: StructureKind.TypeAlias,
+    name: "AllowNonNullableVariables",
+    typeParameters: [{ name: "T" }],
+    type: `
+      T extends { readonly kind: "non_null" }
+      ? T
+      : T extends { readonly kind: "list"; readonly inner: infer Inner }
+      ? { readonly kind: "non_null"; readonly inner: Inner }
+      : T
+    `,
+  });
+
   const fragmentBuilderIfaceName = "Builder_Fragment";
 
   statements.push({
     kind: StructureKind.Interface,
     name: fragmentBuilderIfaceName,
     callSignatures: Object.values(schema.getTypeMap())
-      .map((type): CallSignatureDeclarationStructure | undefined => {
+      .map((type): CallSignatureDeclarationStructure[] => {
         const resultTypeParameter = {
           name: "Result",
-          constraint: "readonly [any, ...any[]]",
+          constraint: makeSelectionResult(`PossibleTypes_${type.name}`),
+          isConst: true,
         };
         if (
           type instanceof GraphQLObjectType ||
@@ -719,13 +770,14 @@ async function generateForSchema(
           type instanceof GraphQLUnionType
         ) {
           if (type.name.startsWith("__")) {
-            return undefined;
+            return [];
           }
           let possibleTypes = `Exclude<PossibleTypes_${type.name}, "${type.name}">`;
           if (type instanceof GraphQLObjectType) {
             possibleTypes = `PossibleTypes_${type.name}`;
           }
-          return {
+          const callSignatures: CallSignatureDeclarationStructure[] = [];
+          callSignatures.push({
             kind: StructureKind.CallSignature,
             typeParameters: [
               resultTypeParameter,
@@ -749,11 +801,54 @@ async function generateForSchema(
               },
             ],
             returnType: `FragmentDefinition<${possibleTypes}, "${type.name}", SelectionSetOutput<Result, ${possibleTypes}>>`,
-          };
+          });
+          callSignatures.push({
+            kind: StructureKind.CallSignature,
+            typeParameters: [
+              resultTypeParameter,
+              {
+                name: "Name",
+                constraint: "string",
+              },
+              {
+                name: "Variables",
+                constraint: "Record<string, string>",
+                isConst: true,
+              },
+            ],
+            parameters: [
+              {
+                name: "name",
+                type: "Name",
+              },
+              {
+                name: "typeCondition",
+                type: `"${type.name}"`,
+              },
+              {
+                name: "variables",
+                type: "Variables",
+              },
+              {
+                name: "builder",
+                type: `
+                  (b: Builder_${type.name}, v: {
+                    [K in keyof Variables]: ParseVariableDef<Variables[K]>
+                  }) => Result
+                `,
+              },
+            ],
+            returnType: `FragmentDefinitionWithVariables<${possibleTypes}, "${type.name}", {
+              [K in keyof Variables]: AllowNonNullableVariables<ParseVariableDef<Variables[K]>>
+            }, SelectionSetOutput<Result, ${possibleTypes}>, {
+              [K in keyof Variables]: VariableInput<ParseVariableDef<Variables[K]>>
+            }>`,
+          });
+          return callSignatures;
         }
-        return undefined;
+        return [];
       })
-      .filter((x): x is NonNullable<typeof x> => x !== undefined),
+      .flat(),
   });
 
   const rootBuilderTypes: Record<string, string> = {
@@ -790,18 +885,6 @@ async function generateForSchema(
         .join(";\n")}
     }`,
     isExported: true,
-  });
-
-  statements.push({
-    kind: StructureKind.TypeAlias,
-    isExported: true,
-    name: "OutputOf",
-    typeParameters: [
-      {
-        name: "T",
-      },
-    ],
-    type: "T extends Operation<infer Output> ? Output : SelectionOutput<T>",
   });
 
   file.addStatements([
@@ -842,7 +925,6 @@ async function generateForSchema(
         import type {Builder} from "./types";
         import {builder} from "gqlb"
         export const b = builder as any as Builder;
-        export type {OutputOf} from "./types";
       `,
       {
         parser: "typescript",
