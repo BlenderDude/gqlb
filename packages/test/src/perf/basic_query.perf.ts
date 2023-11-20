@@ -11,5 +11,5 @@ export default function () {
     ])
   ])
 
-  QUERY.document();
+  return QUERY.document();
 }

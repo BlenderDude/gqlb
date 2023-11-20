@@ -14,6 +14,7 @@ import {
   SelectionSetNode,
   SelectionNode,
   print,
+  isConstValueNode,
 } from "graphql";
 import { SelectionSetSelection } from "./helpers";
 
@@ -55,6 +56,8 @@ class FragmentMap extends Map<
   string,
   FragmentDefinition | FragmentDefinitionWithVariables
 > {
+  fragments = new Set<FragmentDefinition | FragmentDefinitionWithVariables>();
+
   constructor() {
     super();
   }
@@ -102,8 +105,29 @@ class FragmentMap extends Map<
       throw new Error(lines.join("\n"));
     }
 
+    this.fragments.add(fragment);
     super.set(fragment.name, fragment);
     return this;
+  }
+
+  has(
+    nameOrFragment:
+      | string
+      | FragmentDefinition
+      | FragmentDefinitionWithVariables
+  ) {
+    if (typeof nameOrFragment === "string") {
+      return super.has(nameOrFragment);
+    }
+    return this.fragments.has(nameOrFragment);
+  }
+
+  clear(): void {
+    throw new Error("Cannot clear fragment map");
+  }
+
+  delete(): boolean {
+    throw new Error("Cannot delete from fragment map");
   }
 }
 
@@ -157,7 +181,9 @@ function makeValueNode(value: unknown): ValueNode {
   throw new Error(`Unsupported value: ${value}`);
 }
 
-function createSelectionSet(selections: ReadonlyArray<SelectionSetSelection>): SelectionSetNode {
+function createSelectionSet(
+  selections: ReadonlyArray<SelectionSetSelection>
+): SelectionSetNode {
   const nodes: SelectionNode[] = [
     {
       kind: "Field" as Kind.FIELD,
@@ -187,17 +213,16 @@ function createSelectionSet(selections: ReadonlyArray<SelectionSetSelection>): S
     kind: "SelectionSet" as Kind.SELECTION_SET,
     selections: nodes,
   };
-
 }
 
 abstract class Selection {
-  abstract subFragments(): FragmentMap;
+  abstract collectFragments(map: FragmentMap): void;
 }
 
 export class Field<
   const Name extends string = any,
   const Alias extends string | undefined = any,
-  const Output = any
+  const Output = any,
 > extends Selection {
   private readonly _output!: Output;
   private readonly _alias!: Alias;
@@ -210,14 +235,10 @@ export class Field<
     super();
   }
 
-  subFragments(): FragmentMap {
-    const map = new FragmentMap();
+  collectFragments(map: FragmentMap): void {
     for (const selection of this.selections ?? []) {
-      for (const [name, fragment] of selection.subFragments()) {
-        map.set(name, fragment);
-      }
+      selection.collectFragments(map);
     }
-    return map;
   }
 
   alias<A extends string>(name: A): Field<Name, A, Output> {
@@ -250,7 +271,7 @@ export class Field<
 export class InlineFragment<
   const PossibleTypes extends string = any,
   const TypeCondition extends string = any,
-  const Output = any
+  const Output = any,
 > extends Selection {
   private readonly _output!: Output;
   public readonly _possibleTypes!: PossibleTypes;
@@ -262,14 +283,10 @@ export class InlineFragment<
     super();
   }
 
-  subFragments(): FragmentMap {
-    const map = new FragmentMap();
+  collectFragments(map: FragmentMap): void {
     for (const selection of this.selections) {
-      for (const [name, fragment] of selection.subFragments()) {
-        map.set(name, fragment);
-      }
+      selection.collectFragments(map);
     }
-    return map;
   }
 
   document(): InlineFragmentNode {
@@ -288,13 +305,51 @@ export class InlineFragment<
   }
 }
 
+class KeyedCache<T> {
+  private cache:
+    | {
+        value: T;
+        cacheKey: any[] | undefined;
+      }
+    | undefined = undefined;
+
+  constructor(private cacheKeyFn: undefined | (() => any[])) {}
+
+  get(): T | undefined {
+    const cacheKey = this.cacheKeyFn?.();
+    if (!this.cache) {
+      return undefined;
+    }
+    if (cacheKey === undefined && this.cache.cacheKey === undefined) {
+      return this.cache.value;
+    }
+    if (
+      cacheKey !== undefined &&
+      cacheKey.length !== 0 &&
+      cacheKey.every((v, i) => v === this.cache!.cacheKey![i])
+    ) {
+      return this.cache.value;
+    }
+    return undefined;
+  }
+  set(value: T) {
+    const cacheKey = this.cacheKeyFn?.();
+    this.cache = {
+      value,
+      cacheKey,
+    };
+  }
+}
+
 export class FragmentDefinition<
   const PossibleTypes extends string = any,
   const TypeCondition extends string = any,
-  const Output = any
+  const Output = any,
 > extends Selection {
   private readonly _output!: Output;
   public readonly _possibleTypes!: PossibleTypes;
+
+  private cache = new KeyedCache<TypedDocumentNode<Output, {}>>(undefined);
 
   constructor(
     public readonly name: string,
@@ -304,15 +359,14 @@ export class FragmentDefinition<
     super();
   }
 
-  subFragments(): FragmentMap {
-    const map = new FragmentMap();
+  collectFragments(map: FragmentMap): void {
+    if (map.has(this)) {
+      return;
+    }
     map.set(this.name, this);
     for (const selection of this.selections) {
-      for (const [name, fragment] of selection.subFragments()) {
-        map.set(name, fragment);
-      }
+      selection.collectFragments(map);
     }
-    return map;
   }
 
   definition(): FragmentDefinitionNode {
@@ -333,12 +387,20 @@ export class FragmentDefinition<
     };
   }
 
-  document(): TypedDocumentNode<Output, any> {
-    const fragments = [...this.subFragments().values()];
-    return {
+  document(): TypedDocumentNode<Output, {}> {
+    const cached = this.cache.get();
+    if (cached) {
+      return cached;
+    }
+    const fragmentMap = new FragmentMap();
+    this.collectFragments(fragmentMap);
+    const fragments = Array.from(fragmentMap.values());
+    const doc: TypedDocumentNode<Output, {}> = {
       kind: "Document" as Kind.DOCUMENT,
-      definitions: [...fragments.map((f) => f.definition())],
+      definitions: fragments.map((f) => f.definition()),
     };
+    this.cache.set(doc);
+    return doc;
   }
 
   spread(): FragmentSpreadNode {
@@ -350,6 +412,16 @@ export class FragmentDefinition<
       },
     };
   }
+
+  dynamic(cacheKey?: () => any[]) {
+    this.cache = new KeyedCache(cacheKey ?? (() => []));
+    return this;
+  }
+
+  static() {
+    this.cache = new KeyedCache(undefined);
+    return this;
+  }
 }
 
 export class FragmentDefinitionWithVariables<
@@ -357,11 +429,15 @@ export class FragmentDefinitionWithVariables<
   const TypeCondition extends string = any,
   const Variables = any,
   const Output = any,
-  const VariableInput = any
+  const VariableInput = any,
 > extends Selection {
   _variables!: Variables;
   private readonly _output!: Output;
   public readonly _possibleTypes!: PossibleTypes;
+
+  private cache = new KeyedCache<TypedDocumentNode<Output, VariableInput>>(
+    undefined
+  );
 
   constructor(
     public readonly name: string,
@@ -423,15 +499,14 @@ export class FragmentDefinitionWithVariables<
     );
   }
 
-  subFragments(): FragmentMap {
-    const map = new FragmentMap();
+  collectFragments(map: FragmentMap): void {
+    if (map.has(this)) {
+      return;
+    }
     map.set(this.name, this);
     for (const selection of this.builder(this.variables)) {
-      for (const [name, fragment] of selection.subFragments()) {
-        map.set(name, fragment);
-      }
+      selection.collectFragments(map);
     }
-    return map;
   }
 
   definition(
@@ -474,11 +549,19 @@ export class FragmentDefinitionWithVariables<
   }
 
   document(): TypedDocumentNode<Output, VariableInput> {
-    const fragments = [...this.subFragments().values()];
-    return {
+    const cached = this.cache.get();
+    if (cached) {
+      return cached;
+    }
+    const fragmentMap = new FragmentMap();
+    this.collectFragments(fragmentMap);
+
+    const doc: TypedDocumentNode<Output, VariableInput> = {
       kind: "Document" as Kind.DOCUMENT,
-      definitions: [...fragments.map((f) => f.definition())],
+      definitions: Array.from(fragmentMap.values()).map((f) => f.definition()),
     };
+    this.cache.set(doc);
+    return doc;
   }
 
   spread(): FragmentSpreadNode {
@@ -490,17 +573,27 @@ export class FragmentDefinitionWithVariables<
       },
     };
   }
+
+  dynamic(cacheKey?: () => any[]) {
+    this.cache = new KeyedCache(cacheKey ?? (() => []));
+    return this;
+  }
+
+  static() {
+    this.cache = new KeyedCache(undefined);
+    return this;
+  }
 }
 
 export class FragmentSpread<
-  F extends FragmentDefinition | FragmentDefinitionWithVariables
+  F extends FragmentDefinition | FragmentDefinitionWithVariables,
 > extends Selection {
   constructor(public readonly def: F) {
     super();
   }
 
-  subFragments(): FragmentMap {
-    return this.def.subFragments();
+  collectFragments(map: FragmentMap): void {
+    this.def.collectFragments(map);
   }
 
   document(): FragmentSpreadNode {
@@ -515,6 +608,10 @@ export class FragmentSpread<
 }
 
 export class Operation<const Output = any, const Variables = any> {
+  private cache = new KeyedCache<TypedDocumentNode<Output, Variables>>(
+    undefined
+  );
+
   constructor(
     public readonly name: string,
     public readonly type: "query" | "mutation" | "subscription",
@@ -523,16 +620,18 @@ export class Operation<const Output = any, const Variables = any> {
   ) {}
 
   document(): TypedDocumentNode<Output, Variables> {
-    const fragments = new FragmentMap();
-    for (const selection of this.selections) {
-      for (const fragment of selection.subFragments().values()) {
-        fragments.set(fragment.name, fragment);
-      }
+    const cached = this.cache.get();
+    if (cached) {
+      return cached;
     }
-    return {
+    const fragmentMap = new FragmentMap();
+    for (const selection of this.selections) {
+      selection.collectFragments(fragmentMap);
+    }
+    const document = {
       kind: "Document" as Kind.DOCUMENT,
       definitions: [
-        ...Array.from(fragments.values()).map((f) => f.definition()),
+        ...Array.from(fragmentMap.values()).map((f) => f.definition()),
         {
           directives: [],
           kind: "OperationDefinition" as Kind.OPERATION_DEFINITION,
@@ -545,7 +644,23 @@ export class Operation<const Output = any, const Variables = any> {
           selectionSet: createSelectionSet(this.selections),
         },
       ],
-    };
+    } as TypedDocumentNode<Output, Variables>;
+    this.cache.set(document);
+    return document;
+  }
+
+  /**
+   *
+   * @param cacheKey A cache key that describes what values are used to build the query. No cache key or an empty array means the query will regenerate every time.
+   */
+  dynamic(cacheKey?: () => any[]) {
+    this.cache = new KeyedCache(cacheKey ?? (() => []));
+    return this;
+  }
+
+  static() {
+    this.cache = new KeyedCache(undefined);
+    return this;
   }
 }
 

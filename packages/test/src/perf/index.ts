@@ -1,7 +1,8 @@
 import {performance} from "perf_hooks"
 import fs from "fs/promises";
+import { DocumentNode, visit, visitInParallel } from "graphql";
 
-async function measure(samples: number, fn: () => Promise<void> | void): Promise<{
+async function measure(samples: number, fn: () => Promise<DocumentNode> | DocumentNode): Promise<{
   min: number;
   max: number;
   average: number;
@@ -27,10 +28,29 @@ async function measure(samples: number, fn: () => Promise<void> | void): Promise
   }
 }
 
-async function runPerformanceTest(label: string, fn: () => Promise<void> | void) {
-  const samples = 5000;
+function getQueryMetrics(document: DocumentNode): {
+  definitions: number;
+  fields: number;
+} {
+  let definitions = 0;
+  let fields = 0;
+  visit(document, {
+    OperationDefinition: () => {definitions++},
+    FragmentDefinition: () => {definitions++},
+    Field: () => {fields++}, 
+  })
+  return {
+    definitions,
+    fields,
+  }
+}
+
+async function runPerformanceTest(label: string, fn: () => Promise<DocumentNode> | DocumentNode) {
+  const samples = 500;
   const result = await measure(samples, fn);
-  console.log(`${label}:`);
+  const document = await fn();
+  const metrics = getQueryMetrics(document);
+  console.log(`${label}: ${metrics.definitions} definition${metrics.definitions !== 1 ? 's' : ''}, ${metrics.fields} field${metrics.fields !== 1 ? 's' : ''}`);
   for(const key in result) {
     if(key === "samples") {
       console.log(`  ${key}: ${result[key as keyof typeof result]}`)
@@ -43,12 +63,12 @@ async function runPerformanceTest(label: string, fn: () => Promise<void> | void)
 
 async function main() {
   const testFiles = await fs.readdir(__dirname).then(files => files.filter(file => /\.perf\.(ts|js)$/.test(file)));
-  for(const testFile of testFiles) {
+  for (const testFile of testFiles) {
     let {default: fn, label} = await import(`./${testFile}`);
     if(!label) {
       label = testFile.replace(/\.perf\.(ts|js)$/, "");
     }
-    runPerformanceTest(label, fn);
+    await runPerformanceTest(label, fn);
   }
 }
 

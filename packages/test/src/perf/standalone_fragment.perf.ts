@@ -25,5 +25,5 @@ export default function () {
     ])
   ])
 
-  FRAGMENT.document();
+  return FRAGMENT.document();
 }

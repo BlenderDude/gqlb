@@ -1,7 +1,5 @@
 **/generated/*
 .env
 node_modules
-*.js
 trace
 dist
-gqlb*.tgz

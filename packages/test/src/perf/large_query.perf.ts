@@ -1,13 +1,12 @@
 import { FragmentDefinition } from "@gqlb/core";
 import { b } from "../generated/test_01/b";
-import {print} from "graphql";
 
 export const label = "Large Query";
 
 export default function () {
 
   const productFragments: FragmentDefinition[] = [];
-  for(let i = 0; i < 100; i++) {
+  for(let i = 0; i < 1000; i++) {
     productFragments.push(b.fragment(`ProductFragment${i}`, 'Product', b => [
       //
       b.id(),
@@ -17,7 +16,7 @@ export default function () {
   }
 
   const fragments: FragmentDefinition[] = [];
-  for(let i = 0; i < 100; i++) {
+  for(let i = 0; i < 1000; i++) {
     fragments.push(b.fragment(`Fragment${i}`, 'User', b => [
       //
       b.name(),
@@ -48,5 +47,5 @@ export default function () {
     })
   ]);
 
-  LARGE_QUERY.document();
+  return LARGE_QUERY.document();
 }
