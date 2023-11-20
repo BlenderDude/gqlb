@@ -1,0 +1,2 @@
+https://gqlb.pages.dev https://gqlb.io 301
+https://gqlb.pages.dev/* https://gqlb.io/:splat 301
