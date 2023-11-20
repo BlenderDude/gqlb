@@ -86,6 +86,9 @@ importers:
       '@docusaurus/preset-classic':
         specifier: 3.0.0
         version: 3.0.0(@algolia/client-search@4.20.0)(@types/react@18.2.37)(react-dom@18.2.0)(react@18.2.0)(search-insights@2.11.0)(typescript@5.2.2)
+      '@docusaurus/theme-classic':
+        specifier: ^3.0.0
+        version: 3.0.0(@types/react@18.2.37)(react-dom@18.2.0)(react@18.2.0)(typescript@5.2.2)
       '@mdx-js/react':
         specifier: ^3.0.0
         version: 3.0.0(@types/react@18.2.37)(react@18.2.0)
@@ -105,9 +108,18 @@ importers:
       '@docusaurus/module-type-aliases':
         specifier: 3.0.0
         version: 3.0.0(react-dom@18.2.0)(react@18.2.0)
+      '@docusaurus/tsconfig':
+        specifier: 3.0.0
+        version: 3.0.0
       '@docusaurus/types':
         specifier: 3.0.0
         version: 3.0.0(react-dom@18.2.0)(react@18.2.0)
+      '@types/node':
+        specifier: ^20.9.2
+        version: 20.9.2
+      typescript:
+        specifier: ~5.2.2
+        version: 5.2.2
 
 packages:
 
@@ -2288,6 +2300,10 @@ packages:
       tslib: 2.6.2
     dev: false
 
+  /@docusaurus/tsconfig@3.0.0:
+    resolution: {integrity: sha512-yR9sng4izFudS+v1xV5yboNfc1hATMDpYp9iYfWggbBDwKSm0J1IdIgkygRnqC/AWs1ARUQUpG0gFotPCE/4Ew==}
+    dev: true
+
   /@docusaurus/types@3.0.0(react-dom@18.2.0)(react@18.2.0):
     resolution: {integrity: sha512-Qb+l/hmCOVemReuzvvcFdk84bUmUFyD0Zi81y651ie3VwMrXqC7C0E7yZLKMOsLj/vkqsxHbtkAuYMI89YzNzg==}
     peerDependencies:
@@ -2443,7 +2459,7 @@ packages:
     resolution: {integrity: sha512-UTYAUj/wviwdsMfzoSJspJxbkH5o1snzwX0//0ENX1u/55kkZZkcTZP6u9bwKGkv+dkk9at4m1Cpt0uY80kcpQ==}
     dependencies:
       '@jridgewell/gen-mapping': 0.3.3
-      '@jridgewell/trace-mapping': 0.3.9
+      '@jridgewell/trace-mapping': 0.3.20
 
   /@jridgewell/sourcemap-codec@1.4.15:
     resolution: {integrity: sha512-eF2rxCRulEKXHTRiDrDy6erMYWqNw4LPdQ8UQA4huuxaQsVeRPFl2oM8oDGxMFhJUWZf9McpLtJasDDZb/Bpeg==}
