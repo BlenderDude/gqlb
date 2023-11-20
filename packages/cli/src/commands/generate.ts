@@ -490,7 +490,7 @@ async function generateForSchema(
   );
 
   file.addImportDeclaration({
-    moduleSpecifier: "gqlb",
+    moduleSpecifier: "@gqlb/core",
     namedImports: [
       "Field",
       "InlineFragment",
@@ -923,7 +923,7 @@ async function generateForSchema(
       `
         /* eslint-disable */
         import type {Builder} from "./types";
-        import {builder} from "gqlb"
+        import {builder} from "@gqlb/core"
         export const b = builder as any as Builder;
       `,
       {

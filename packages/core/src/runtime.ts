@@ -10,7 +10,7 @@ import {
   type OperationTypeNode,
   type VariableDefinitionNode,
   type VariableNode,
-  ValueNode,
+  type ValueNode,
   SelectionSetNode,
   SelectionNode,
   print,
@@ -115,6 +115,7 @@ function makeValueNode(value: unknown): ValueNode {
   }
   if (typeof value === "string") {
     return {
+      block: false,
       kind: "StringValue" as Kind.STRING,
       value,
     };
@@ -156,44 +157,47 @@ function makeValueNode(value: unknown): ValueNode {
   throw new Error(`Unsupported value: ${value}`);
 }
 
+function createSelectionSet(selections: ReadonlyArray<SelectionSetSelection>): SelectionSetNode {
+  const nodes: SelectionNode[] = [
+    {
+      kind: "Field" as Kind.FIELD,
+      alias: undefined,
+      arguments: [],
+      directives: [],
+      name: {
+        kind: "Name" as Kind.NAME,
+        value: "__typename",
+      },
+      selectionSet: undefined,
+    },
+  ];
+  nodes.push(
+    ...selections.map((s) => {
+      if (
+        s instanceof FragmentDefinition ||
+        s instanceof FragmentDefinitionWithVariables
+      ) {
+        return s.spread();
+      }
+      return s.document();
+    })
+  );
+
+  return {
+    kind: "SelectionSet" as Kind.SELECTION_SET,
+    selections: nodes,
+  };
+
+}
+
 abstract class Selection {
   abstract subFragments(): FragmentMap;
-
-  createSelectionSet(
-    selections: ReadonlyArray<SelectionSetSelection>
-  ): SelectionSetNode {
-    const nodes: SelectionNode[] = [
-      {
-        kind: "Field" as Kind.FIELD,
-        name: {
-          kind: "Name" as Kind.NAME,
-          value: "__typename",
-        },
-      },
-    ];
-    nodes.push(
-      ...selections.map((s) => {
-        if (
-          s instanceof FragmentDefinition ||
-          s instanceof FragmentDefinitionWithVariables
-        ) {
-          return s.spread();
-        }
-        return s.document();
-      })
-    );
-
-    return {
-      kind: "SelectionSet" as Kind.SELECTION_SET,
-      selections: nodes,
-    };
-  }
 }
 
 export class Field<
   const Name extends string = any,
   const Alias extends string | undefined = any,
-  const Output = any,
+  const Output = any
 > extends Selection {
   private readonly _output!: Output;
   private readonly _alias!: Alias;
@@ -228,6 +232,7 @@ export class Field<
         kind: "Name" as Kind.NAME,
         value: this.name,
       },
+      directives: [],
       alias: this._alias
         ? {
             kind: "Name" as Kind.NAME,
@@ -236,7 +241,7 @@ export class Field<
         : undefined,
       arguments: this.args,
       selectionSet: this.selections
-        ? this.createSelectionSet(this.selections)
+        ? createSelectionSet(this.selections)
         : undefined,
     };
   }
@@ -245,7 +250,7 @@ export class Field<
 export class InlineFragment<
   const PossibleTypes extends string = any,
   const TypeCondition extends string = any,
-  const Output = any,
+  const Output = any
 > extends Selection {
   private readonly _output!: Output;
   public readonly _possibleTypes!: PossibleTypes;
@@ -270,6 +275,7 @@ export class InlineFragment<
   document(): InlineFragmentNode {
     return {
       kind: "InlineFragment" as Kind.INLINE_FRAGMENT,
+      directives: [],
       typeCondition: {
         kind: "NamedType" as Kind.NAMED_TYPE,
         name: {
@@ -277,7 +283,7 @@ export class InlineFragment<
           value: this.typeCondition,
         },
       },
-      selectionSet: this.createSelectionSet(this.selections)!,
+      selectionSet: createSelectionSet(this.selections)!,
     };
   }
 }
@@ -285,7 +291,7 @@ export class InlineFragment<
 export class FragmentDefinition<
   const PossibleTypes extends string = any,
   const TypeCondition extends string = any,
-  const Output = any,
+  const Output = any
 > extends Selection {
   private readonly _output!: Output;
   public readonly _possibleTypes!: PossibleTypes;
@@ -323,7 +329,7 @@ export class FragmentDefinition<
           value: this.typeCondition,
         },
       },
-      selectionSet: this.createSelectionSet(this.selections)!,
+      selectionSet: createSelectionSet(this.selections)!,
     };
   }
 
@@ -351,7 +357,7 @@ export class FragmentDefinitionWithVariables<
   const TypeCondition extends string = any,
   const Variables = any,
   const Output = any,
-  const VariableInput = any,
+  const VariableInput = any
 > extends Selection {
   _variables!: Variables;
   private readonly _output!: Output;
@@ -463,7 +469,7 @@ export class FragmentDefinitionWithVariables<
           value: this.typeCondition,
         },
       },
-      selectionSet: this.createSelectionSet(this.builder(variables))!,
+      selectionSet: createSelectionSet(this.builder(variables))!,
     };
   }
 
@@ -487,7 +493,7 @@ export class FragmentDefinitionWithVariables<
 }
 
 export class FragmentSpread<
-  F extends FragmentDefinition | FragmentDefinitionWithVariables,
+  F extends FragmentDefinition | FragmentDefinitionWithVariables
 > extends Selection {
   constructor(public readonly def: F) {
     super();
@@ -518,16 +524,6 @@ export class Operation<const Output = any, const Variables = any> {
 
   document(): TypedDocumentNode<Output, Variables> {
     const fragments = new FragmentMap();
-    const variables = Object.fromEntries(
-      this.variableDefinitions.map((def) => {
-        return [
-          def.variable.name.value,
-          {
-            [variableSymbol]: def.variable,
-          },
-        ];
-      })
-    );
     for (const selection of this.selections) {
       for (const fragment of selection.subFragments().values()) {
         fragments.set(fragment.name, fragment);
@@ -538,6 +534,7 @@ export class Operation<const Output = any, const Variables = any> {
       definitions: [
         ...Array.from(fragments.values()).map((f) => f.definition()),
         {
+          directives: [],
           kind: "OperationDefinition" as Kind.OPERATION_DEFINITION,
           name: {
             kind: "Name" as Kind.NAME,
@@ -545,18 +542,7 @@ export class Operation<const Output = any, const Variables = any> {
           },
           operation: this.type as OperationTypeNode,
           variableDefinitions: this.variableDefinitions,
-          selectionSet: {
-            kind: "SelectionSet" as Kind.SELECTION_SET,
-            selections: this.selections.map((s) => {
-              if (
-                s instanceof FragmentDefinition ||
-                s instanceof FragmentDefinitionWithVariables
-              ) {
-                return s.spread();
-              }
-              return s.document();
-            }),
-          },
+          selectionSet: createSelectionSet(this.selections),
         },
       ],
     };
@@ -655,6 +641,8 @@ function makeOperationBuilder(type: OperationTypeNode) {
       for (const [name, type] of Object.entries(arg1)) {
         variableDefinitions.push({
           kind: "VariableDefinition" as Kind.VARIABLE_DEFINITION,
+          defaultValue: undefined,
+          directives: [],
           variable: {
             kind: "Variable" as Kind.VARIABLE,
             name: {

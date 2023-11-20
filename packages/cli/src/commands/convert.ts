@@ -1,5 +1,4 @@
 import {
-  DocumentNode,
   FragmentDefinitionNode,
   Kind,
   OperationDefinitionNode,

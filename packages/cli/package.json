@@ -1,0 +1,29 @@
+{
+  "name": "@gqlb/cli",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "bin": {
+    "gqlb": "dist/gqlb.js"
+  },
+  "scripts": {
+    "build": "rimraf dist && tsc"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^20.9.2",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.2.2"
+  },
+  "dependencies": {
+    "clipboardy": "^4.0.0",
+    "cosmiconfig": "^8.3.6",
+    "graphql": "^16.8.1",
+    "graphql-request": "^6.1.0",
+    "prettier": "^3.1.0",
+    "ts-morph": "^20.0.0",
+    "zod": "^3.22.4"
+  }
+}

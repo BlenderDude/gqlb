@@ -1,0 +1,23 @@
+{
+  "name": "@gqlb/core",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "rimraf dist && tsc"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "rimraf": "^5.0.5",
+    "typescript": "^5.2.2"
+  },
+  "peerDependencies": {
+    "graphql": "^16 || ^15"
+  },
+  "dependencies": {
+    "@graphql-typed-document-node/core": "^3.2.0"
+  }
+}
