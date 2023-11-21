@@ -29,14 +29,14 @@ export type ReadonlyIntersectionCollapse<T> = T extends Function
 export type SelectionOutput<T> = T extends Field<any, any, infer O>
   ? O
   : T extends InlineFragment<any, any, infer O>
-  ? O
-  : T extends FragmentDefinition<any, any, infer O>
-  ? O
-  : T extends FragmentDefinitionWithVariables<any, any, any, infer O>
-  ? O
-  : T extends FragmentSpread<infer F>
-  ? SelectionOutput<F>
-  : never;
+    ? O
+    : T extends FragmentDefinition<any, any, infer O>
+      ? O
+      : T extends FragmentDefinitionWithVariables<any, any, any, infer O>
+        ? O
+        : T extends FragmentSpread<infer F>
+          ? SelectionOutput<F>
+          : never;
 
 export type SelectionSetSelection<PossibleTypes extends string = string> =
   | Field
@@ -73,20 +73,22 @@ export type BuildSelectionSet<
         Acc & ResponseKeyObj<Head, SelectionOutput<Head>>
       >
     : Head extends FragmentSpread<
-        infer F extends FragmentDefinition | FragmentDefinitionWithVariables
-      >
-    ? BuildSelectionSet<Tail, PT, Acc & FragmentOutput<F, PT>>
-    : Head extends InlineFragment
-    ? BuildSelectionSet<Tail, PT, Acc & FragmentOutput<Head, PT>>
-    : never
+          infer F extends FragmentDefinition | FragmentDefinitionWithVariables
+        >
+      ? BuildSelectionSet<Tail, PT, Acc & FragmentOutput<F, PT>>
+      : Head extends InlineFragment
+        ? BuildSelectionSet<Tail, PT, Acc & FragmentOutput<Head, PT>>
+        : never
   : Acc;
 
 export type SelectionSetOutput<
   T extends ReadonlyArray<SelectionSetSelection>,
   PossibleTypes extends string,
-> = PossibleTypes extends infer PT
-  ? ReadonlyIntersectionCollapse<BuildSelectionSet<T, PT & string>>
-  : never;
+> = T extends Function
+  ? never
+  : PossibleTypes extends infer PT
+    ? ReadonlyIntersectionCollapse<BuildSelectionSet<T, PT & string>>
+    : never;
 
 export type OutputOf<T> = T extends Operation<infer Output>
   ? Output

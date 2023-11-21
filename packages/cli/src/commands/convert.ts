@@ -9,6 +9,7 @@ import {
 } from "graphql";
 import prettier from "prettier";
 import { loadConfig } from "../helpers/config";
+import { copyToClipboard } from "../helpers/copy";
 
 function makeScreamingSnakeCase(name: string) {
   return name
@@ -236,6 +237,7 @@ export async function convert() {
   console.log(code);
 
   console.log("\n==== End Output ====");
-  await import("clipboardy").then((c) => c.default.write(code));
-  console.log("Copied to clipboard!");
+  if (copyToClipboard(code)) {
+    console.log("Copied to clipboard!");
+  }
 }
