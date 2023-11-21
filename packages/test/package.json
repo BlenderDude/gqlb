@@ -1,7 +1,6 @@
 {
   "name": "@gqlb/test",
   "private": true,
-  "version": "0.0.1",
   "dependencies": {
     "@gqlb/core": "workspace:*",
     "graphql": "^16.8.1"
