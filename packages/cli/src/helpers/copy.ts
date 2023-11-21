@@ -1,23 +1,19 @@
 import { execSync } from "child_process";
 
-export function copyToClipboard(value: string): boolean {
-  let copied = false;
+function run(command: string, input: string): boolean {
   try {
-    execSync("pbcopy", { input: value, stdio: "ignore" });
-    copied = true;
-  } catch {}
-  try {
-    execSync("xclip", { input: value, stdio: "ignore" });
-    copied = true;
-  } catch {}
-  try {
-    execSync("xsel", { input: value, stdio: "ignore" });
-    copied = true;
-  } catch {}
-  try {
-    execSync("clip.exe", { input: value, stdio: "ignore" });
-    copied = true;
-  } catch {}
+    execSync(command, { stdio: ["pipe", "ignore", "ignore"], input });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
 
-  return copied;
+export function copyToClipboard(value: string): boolean {
+  return (
+    run("pbcopy", value) ||
+    run("xclip", value) ||
+    run("xsel", value) ||
+    run("clip.exe", value)
+  );
 }
