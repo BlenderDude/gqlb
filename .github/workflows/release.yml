@@ -20,6 +20,9 @@ jobs:
         with:
           node-version: 18.x
 
+      - name: Install pnpm
+        run: npm i -g pnpm
+
       - name: Install Dependencies
         run: pnpm i
 
