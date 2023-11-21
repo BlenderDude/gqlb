@@ -1,5 +1,5 @@
 {
-  "name": "website",
+  "name": "@gqlb/website",
   "private": true,
   "scripts": {
     "docusaurus": "docusaurus",
