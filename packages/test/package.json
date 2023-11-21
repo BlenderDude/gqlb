@@ -16,5 +16,6 @@
     "perf": "npm run build && node --enable-source-maps ./dist/perf/index.js",
     "build": "tsc",
     "perf:debug": "npm run build && node --enable-source-maps --inspect-brk ./dist/perf/index.js"
-  }
+  },
+  "version": null
 }
