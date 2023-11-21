@@ -6,7 +6,9 @@ on:
       - main
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
-
+env:
+  CI: true
+  PNPM_CACHE_FOLDER: .pnpm-store
 jobs:
   release:
     name: Release
