@@ -1,11 +1,13 @@
 import { cosmiconfig } from "cosmiconfig";
 import { z } from "zod";
+import { GraphQLSchema } from "graphql";
 
 export const schema = z.object({
   generate: z.record(
     z.string(),
     z.strictObject({
       schema: z.union([
+        z.instanceof(GraphQLSchema),
         z.strictObject({
           sdl: z.string(),
         }),

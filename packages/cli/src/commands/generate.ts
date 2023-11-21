@@ -483,7 +483,10 @@ async function generateForSchema(
   config: z.output<typeof schema>["generate"][string]
 ) {
   let schema: GraphQLSchema;
-  if ("introspect" in config.schema) {
+
+  if (config.schema instanceof GraphQLSchema) {
+    schema = config.schema;
+  } else if ("introspect" in config.schema) {
     schema = await loadSchemaFromUrl(config.schema.introspect);
   } else {
     schema = await loadSchemaFromFile(config.schema.sdl);
