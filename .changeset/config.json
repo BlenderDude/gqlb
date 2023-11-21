@@ -6,6 +6,5 @@
   "linked": [],
   "access": "public",
   "baseBranch": "main",
-  "updateInternalDependencies": "patch",
-  "ignore": ["@gqlb/test", "@gqlb/website"]
+  "updateInternalDependencies": "patch"
 }
