@@ -3,19 +3,19 @@ import { execSync } from "child_process";
 export function copyToClipboard(value: string): boolean {
   let copied = false;
   try {
-    execSync("pbcopy", { input: value });
+    execSync("pbcopy", { input: value, stdio: "ignore" });
     copied = true;
   } catch {}
   try {
-    execSync("xclip", { input: value });
+    execSync("xclip", { input: value, stdio: "ignore" });
     copied = true;
   } catch {}
   try {
-    execSync("xsel", { input: value });
+    execSync("xsel", { input: value, stdio: "ignore" });
     copied = true;
   } catch {}
   try {
-    execSync("clip.exe", { input: value });
+    execSync("clip.exe", { input: value, stdio: "ignore" });
     copied = true;
   } catch {}
 
