@@ -75,7 +75,7 @@ function makeSelections(
       if (s.selectionSet && s.selectionSet.selections.length > 0) {
         fieldArgs.push(`b => ${makeSelections(s.selectionSet, formatComment)}`);
       }
-      let alias;
+      let alias = "";
       if (s.alias) {
         alias = `.alias("${s.alias.value}")`;
       }
