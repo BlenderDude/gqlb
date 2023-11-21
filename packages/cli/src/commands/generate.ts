@@ -6,6 +6,7 @@ import {
   GraphQLInputType,
   GraphQLInterfaceType,
   GraphQLList,
+  GraphQLNamedType,
   GraphQLNonNull,
   GraphQLObjectType,
   GraphQLOutputType,
@@ -35,6 +36,9 @@ import {
 } from "ts-morph";
 import { z } from "zod";
 import { loadConfig, schema } from "../helpers/config";
+import { getScalarTypes } from "../helpers/scalarTypes";
+import { makeTypesFile } from "../generate/makeTypesFile";
+import { makePossibleTypes } from "../generate/makePossibleTypes";
 
 function resolveToRootType(type: GraphQLType) {
   if (type instanceof GraphQLList || type instanceof GraphQLNonNull) {
@@ -186,7 +190,7 @@ function methodsForFields(
       const builderTypeParameter: TypeParameterDeclarationStructure = {
         kind: StructureKind.TypeParameter,
         name: "BuilderResult",
-        constraint: makeSelectionResult(`PossibleTypes_${rootType.name}`),
+        constraint: makeSelectionResult(rootType),
         isConst: true,
       };
 
@@ -255,31 +259,27 @@ function builderFunctionsForInlineFragments(
   type: GraphQLObjectType | GraphQLInterfaceType | GraphQLUnionType
 ): MethodSignatureStructure[] {
   const methods: MethodSignatureStructure[] = [];
-  let possibleTypes: string[];
+  let possibleTypes: Array<
+    GraphQLObjectType | GraphQLInterfaceType | GraphQLUnionType
+  >;
   if (type instanceof GraphQLObjectType) {
-    possibleTypes = [type.name];
+    possibleTypes = [type];
   } else if (type instanceof GraphQLInterfaceType) {
-    possibleTypes = [
-      type.name,
-      ...schema.getPossibleTypes(type).map((t) => t.name),
-    ];
+    possibleTypes = [type, ...schema.getPossibleTypes(type)];
   } else if (type instanceof GraphQLUnionType) {
-    possibleTypes = [type.name, ...type.getTypes().map((t) => t.name)];
+    possibleTypes = [type, ...type.getTypes()];
   } else {
     throw new Error("Expected object, interface, or union type");
   }
   for (const possibleType of possibleTypes) {
-    let outputPossibleTypes = `Exclude<PossibleTypes_${type.name}, "${type.name}">`;
-    if (type instanceof GraphQLObjectType) {
-      outputPossibleTypes = `PossibleTypes_${type.name}`;
-    }
+    const ptType = `PossibleTypes_${possibleType.name}`;
     methods.push({
       kind: StructureKind.MethodSignature,
       name: "__on",
       typeParameters: [
         {
           name: "Result",
-          constraint: makeSelectionResult(`PossibleTypes_${possibleType}`),
+          constraint: makeSelectionResult(possibleType),
           isConst: true,
         },
       ],
@@ -293,7 +293,7 @@ function builderFunctionsForInlineFragments(
           type: `(b: Builder_${possibleType}) => Result`,
         },
       ],
-      returnType: `InlineFragment<${outputPossibleTypes}, "${possibleType}", SelectionSetOutput<Result, ${outputPossibleTypes}>>`,
+      returnType: `InlineFragment<${ptType}, "${possibleType.name}", SelectionSetOutput<Result, ${ptType}>>`,
     });
     methods.push({
       kind: StructureKind.MethodSignature,
@@ -396,7 +396,17 @@ function variableUnion(type: GraphQLInputType): string {
   return union.join(" | ");
 }
 
-function makeSelectionResult(possibleTypes: string) {
+function makeSelectionResult(type: GraphQLNamedType) {
+  let possibleTypes: string;
+  if (type instanceof GraphQLObjectType) {
+    possibleTypes = `PossibleTypes_${type.name}`;
+  } else if (type instanceof GraphQLInterfaceType) {
+    possibleTypes = `PossibleTypes_${type.name} | "${type.name}"`;
+  } else if (type instanceof GraphQLUnionType) {
+    possibleTypes = `PossibleTypes_${type.name} | "${type.name}"`;
+  } else {
+    throw new Error("Expected object, interface, or union type");
+  }
   return `ReadonlyArray<SelectionSetSelection<${possibleTypes}>>`;
 }
 
@@ -404,7 +414,7 @@ function buildOperationBuilder(
   type: GraphQLObjectType
 ): InterfaceDeclarationStructure {
   const { name } = type;
-  const selectionSetResult = makeSelectionResult(`PossibleTypes_${name}`);
+  const selectionSetResult = makeSelectionResult(type);
   return {
     kind: StructureKind.Interface,
     name: "Builder_Operation_" + name,
@@ -482,7 +492,7 @@ async function generateForSchema(
   const { output } = config;
 
   const file = project.createSourceFile(
-    path.join(process.cwd(), output, "types.d.ts"),
+    path.join(process.cwd(), output, "builder.d.ts"),
     undefined,
     {
       overwrite: true,
@@ -528,7 +538,6 @@ async function generateForSchema(
           kind: StructureKind.TypeAlias,
           name: `PossibleTypes_${name}`,
           type: [
-            `"${name}"`,
             ...schema.getPossibleTypes(type).map((t) => `"${t.name}"`),
           ].join(" | "),
         });
@@ -572,9 +581,10 @@ async function generateForSchema(
       statements.push({
         kind: StructureKind.TypeAlias,
         name: `PossibleTypes_${name}`,
-        type: [`"${name}"`, ...type.getTypes().map((t) => `"${t.name}"`)].join(
-          " | "
-        ),
+        type: type
+          .getTypes()
+          .map((t) => `"${t.name}"`)
+          .join(" | "),
       });
 
       const inlineFragmentBuilders = builderFunctionsForInlineFragments(
@@ -614,15 +624,7 @@ async function generateForSchema(
         })),
       });
     } else if (type instanceof GraphQLScalarType) {
-      const { scalarTypes } = config;
-      const baseTypes: Record<string, string> = {
-        String: "string",
-        Int: "number",
-        Float: "number",
-        Boolean: "boolean",
-        ID: "string | number",
-        ...scalarTypes,
-      };
+      const scalarTypes = getScalarTypes(config);
       statements.push({
         kind: StructureKind.Interface,
         name: `Scalar_${name}`,
@@ -633,11 +635,11 @@ async function generateForSchema(
           },
           {
             name: "_input",
-            type: baseTypes[name] ?? "unknown",
+            type: scalarTypes[name] ?? "unknown",
           },
           {
             name: "_output",
-            type: baseTypes[name] ?? "unknown",
+            type: scalarTypes[name] ?? "unknown",
           },
         ],
       });
@@ -759,11 +761,6 @@ async function generateForSchema(
     name: fragmentBuilderIfaceName,
     callSignatures: Object.values(schema.getTypeMap())
       .map((type): CallSignatureDeclarationStructure[] => {
-        const resultTypeParameter = {
-          name: "Result",
-          constraint: makeSelectionResult(`PossibleTypes_${type.name}`),
-          isConst: true,
-        };
         if (
           type instanceof GraphQLObjectType ||
           type instanceof GraphQLInterfaceType ||
@@ -772,6 +769,11 @@ async function generateForSchema(
           if (type.name.startsWith("__")) {
             return [];
           }
+          const resultTypeParameter = {
+            name: "Result",
+            constraint: makeSelectionResult(type),
+            isConst: true,
+          };
           let possibleTypes = `Exclude<PossibleTypes_${type.name}, "${type.name}">`;
           if (type instanceof GraphQLObjectType) {
             possibleTypes = `PossibleTypes_${type.name}`;
@@ -890,7 +892,7 @@ async function generateForSchema(
   file.addStatements([
     {
       kind: StructureKind.Module,
-      name: `"./types"`,
+      name: `"./builder"`,
       hasDeclareKeyword: true,
       declarationKind: ModuleDeclarationKind.Module,
       statements,
@@ -915,16 +917,24 @@ async function generateForSchema(
   const outputDir = path.join(process.cwd(), output);
 
   await fs.mkdir(outputDir, { recursive: true });
-  await fs.writeFile(path.join(outputDir, "types.d.ts"), text);
+  await fs.writeFile(path.join(outputDir, "builder.d.ts"), text);
+  if (config.emitTypes) {
+    await fs.writeFile(
+      path.join(outputDir, "types.d.ts"),
+      await makeTypesFile(schema, config, project, outputDir)
+    );
+  }
 
   await fs.writeFile(
     path.join(outputDir, "index.ts"),
     await prettier.format(
       `
         /* eslint-disable */
-        import type {Builder} from "./types";
+        import type {Builder} from "./builder";
         import {builder} from "@gqlb/core"
         export const b = builder as any as Builder;
+        ${config.possibleTypes ? makePossibleTypes(schema) : ""}
+        ${config.emitTypes ? `export type { types } from "./types";` : ""}
       `,
       {
         parser: "typescript",

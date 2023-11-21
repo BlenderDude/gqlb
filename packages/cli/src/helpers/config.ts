@@ -15,6 +15,8 @@ export const schema = z.object({
       ]),
       output: z.string(),
       scalarTypes: z.record(z.string(), z.string()).optional(),
+      possibleTypes: z.boolean().default(false),
+      emitTypes: z.boolean().default(true),
     })
   ),
   convert: z
