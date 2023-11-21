@@ -1,6 +1,7 @@
-import { cosmiconfig } from "cosmiconfig";
+import { cosmiconfig, defaultLoaders } from "cosmiconfig";
 import { z } from "zod";
 import { GraphQLSchema } from "graphql";
+import jiti from "jiti";
 
 export const schema = z.object({
   generate: z.record(
@@ -30,7 +31,15 @@ export const schema = z.object({
 });
 
 export async function loadConfig() {
-  const result = await cosmiconfig("gqlb").search(process.cwd());
+  const result = await cosmiconfig("gqlb", {
+    loaders: {
+      ...defaultLoaders,
+      ".ts": (filepath) => {
+        const jitiLoader = jiti("", { interopDefault: true });
+        return jitiLoader(filepath);
+      },
+    },
+  }).search(process.cwd());
   if (!result) {
     // list out the valid file names
     console.log(
