@@ -1,6 +1,5 @@
 import type { TypedDocumentNode } from "@graphql-typed-document-node/core";
 import {
-  parseType,
   type ArgumentNode,
   type FieldNode,
   type FragmentDefinitionNode,
@@ -11,9 +10,9 @@ import {
   type VariableDefinitionNode,
   type VariableNode,
   type ValueNode,
-  SelectionSetNode,
-  SelectionNode,
-  print,
+  type SelectionSetNode,
+  type SelectionNode,
+  parseType,
 } from "graphql";
 import { SelectionSetSelection } from "./helpers";
 
@@ -97,9 +96,7 @@ class FragmentMap extends Map<
       JSON.stringify(existing) !== JSON.stringify(fragment)
     ) {
       const lines = [
-        `Fragment with name ${fragment.name} already exists with a different structure:`,
-        `Existing:\n${print(existing.definition())}`,
-        `Incoming:\n${print(fragment.definition())}`,
+        `Fragment with name ${fragment.name} already exists with a different structure`,
       ];
       throw new Error(lines.join("\n"));
     }
