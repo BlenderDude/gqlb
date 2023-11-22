@@ -7,7 +7,7 @@ import {
   Operation,
 } from "./runtime";
 
-const FragmentRefKey = Symbol("FragmentRef");
+declare const FragmentRefKey: unique symbol;
 
 export type ResponseKey<F extends Field> = F extends Field<
   infer Name,
@@ -60,12 +60,6 @@ export type FragmentName<
 
 export type FragmentRef<
   T extends FragmentDefinition | FragmentDefinitionWithVariables,
-> = {
-  readonly [FragmentRefKey]: FragmentName<T>;
-};
-
-export type FragmentRefWithData<
-  T extends FragmentDefinition | FragmentDefinitionWithVariables,
 > = OutputOf<T> extends infer U ? U & FragmentRef<T> : never;
 
 export type FragmentData<
@@ -82,11 +76,20 @@ export type FragmentOutput<
   Extract<
     SelectionOutput<T> &
       (T extends FragmentDefinition | FragmentDefinitionWithVariables
-        ? FragmentRef<T>
+        ? {
+            readonly [FragmentRefKey]: FragmentName<T>;
+          }
         : never),
     { readonly __typename: PT }
   >
 >;
+
+type IntersectWithFragmentRefUnion<A, B> = Omit<A, typeof FragmentRefKey> &
+  Omit<B, typeof FragmentRefKey> & {
+    [FragmentRefKey]:
+      | A[typeof FragmentRefKey & keyof A]
+      | B[typeof FragmentRefKey & keyof B];
+  };
 
 export type BuildSelectionSet<
   T extends ReadonlyArray<SelectionSetSelection>,
@@ -107,7 +110,11 @@ export type BuildSelectionSet<
     : Head extends FragmentSpread<
           infer F extends FragmentDefinition | FragmentDefinitionWithVariables
         >
-      ? BuildSelectionSet<Tail, PT, Acc & FragmentOutput<F, PT>>
+      ? BuildSelectionSet<
+          Tail,
+          PT,
+          IntersectWithFragmentRefUnion<Acc, FragmentOutput<F, PT>>
+        >
       : Head extends InlineFragment
         ? BuildSelectionSet<Tail, PT, Acc & FragmentOutput<Head, PT>>
         : never
