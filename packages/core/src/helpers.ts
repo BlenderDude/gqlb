@@ -7,6 +7,8 @@ import {
   Operation,
 } from "./runtime";
 
+const FragmentRefKey = Symbol("FragmentRef");
+
 export type ResponseKey<F extends Field> = F extends Field<
   infer Name,
   infer Alias
@@ -30,9 +32,9 @@ export type SelectionOutput<T> = T extends Field<any, any, infer O>
   ? O
   : T extends InlineFragment<any, any, infer O>
     ? O
-    : T extends FragmentDefinition<any, any, infer O>
+    : T extends FragmentDefinition<any, any, any, infer O>
       ? O
-      : T extends FragmentDefinitionWithVariables<any, any, any, infer O>
+      : T extends FragmentDefinitionWithVariables<any, any, any, any, infer O>
         ? O
         : T extends FragmentSpread<infer F>
           ? SelectionOutput<F>
@@ -42,11 +44,33 @@ export type SelectionSetSelection<PossibleTypes extends string = string> =
   | Field
   | InlineFragment<PossibleTypes>
   | FragmentSpread<
-      | FragmentDefinition<PossibleTypes>
-      | FragmentDefinitionWithVariables<PossibleTypes>
+      | FragmentDefinition<any, PossibleTypes>
+      | FragmentDefinitionWithVariables<any, PossibleTypes>
     >;
 
 export type NeverToEmptyObj<T> = [T] extends [never] ? {} : T;
+
+export type FragmentName<
+  T extends FragmentDefinition | FragmentDefinitionWithVariables,
+> = T extends
+  | FragmentDefinition<infer N>
+  | FragmentDefinitionWithVariables<infer N>
+  ? N
+  : never;
+
+export type FragmentRef<
+  T extends FragmentDefinition | FragmentDefinitionWithVariables,
+> = {
+  readonly [FragmentRefKey]: FragmentName<T>;
+};
+
+export type FragmentRefWithData<
+  T extends FragmentDefinition | FragmentDefinitionWithVariables,
+> = OutputOf<T> extends infer U ? U & FragmentRef<T> : never;
+
+export type FragmentData<
+  T extends FragmentDefinition | FragmentDefinitionWithVariables,
+> = OutputOf<T>;
 
 export type FragmentOutput<
   T extends
@@ -54,7 +78,15 @@ export type FragmentOutput<
     | FragmentDefinition
     | FragmentDefinitionWithVariables,
   PT extends string,
-> = NeverToEmptyObj<Extract<SelectionOutput<T>, { readonly __typename: PT }>>;
+> = NeverToEmptyObj<
+  Extract<
+    SelectionOutput<T> &
+      (T extends FragmentDefinition | FragmentDefinitionWithVariables
+        ? FragmentRef<T>
+        : never),
+    { readonly __typename: PT }
+  >
+>;
 
 export type BuildSelectionSet<
   T extends ReadonlyArray<SelectionSetSelection>,
@@ -95,4 +127,6 @@ export type OutputOf<T> = T extends Operation<infer Output>
   : SelectionOutput<T>;
 export type VariablesOf<T> = T extends Operation<any, infer Variables>
   ? Variables
-  : never;
+  : T extends FragmentDefinitionWithVariables<any, any, any, infer Variables>
+    ? Variables
+    : never;
