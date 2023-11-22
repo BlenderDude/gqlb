@@ -14,7 +14,8 @@
   "scripts": {
     "test": "node --test --require ts-node/register src/tests/*.test.ts",
     "perf": "npm run build && node --enable-source-maps ./dist/perf/index.js",
-    "build": "tsc",
+    "build": "npm run gql && tsc",
+    "gql": "gqlb generate",
     "perf:debug": "npm run build && node --enable-source-maps --inspect-brk ./dist/perf/index.js"
   }
 }
