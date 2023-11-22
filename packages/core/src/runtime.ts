@@ -14,7 +14,6 @@ import {
   SelectionSetNode,
   SelectionNode,
   print,
-  isConstValueNode,
 } from "graphql";
 import { SelectionSetSelection } from "./helpers";
 
@@ -342,6 +341,7 @@ class KeyedCache<T> {
 }
 
 export class FragmentDefinition<
+  const Name extends string = any,
   const PossibleTypes extends string = any,
   const TypeCondition extends string = any,
   const Output = any,
@@ -352,7 +352,7 @@ export class FragmentDefinition<
   private cache = new KeyedCache<TypedDocumentNode<Output, {}>>(undefined);
 
   constructor(
-    public readonly name: string,
+    public readonly name: Name,
     public readonly typeCondition: TypeCondition,
     private selections: ReadonlyArray<SelectionSetSelection>
   ) {
@@ -425,6 +425,7 @@ export class FragmentDefinition<
 }
 
 export class FragmentDefinitionWithVariables<
+  const Name extends string = any,
   const PossibleTypes extends string = any,
   const TypeCondition extends string = any,
   const Variables = any,
@@ -440,7 +441,7 @@ export class FragmentDefinitionWithVariables<
   );
 
   constructor(
-    public readonly name: string,
+    public readonly name: Name,
     public readonly typeCondition: TypeCondition,
     private variables: Record<
       keyof Variables,

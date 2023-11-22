@@ -94,15 +94,6 @@ function methodsForFields(
   const fields = Object.values(fieldMap);
 
   for (const field of fields) {
-    // const ifaceName = `Builder_${name}_field_${field.name}`;
-    // const iface: InterfaceDeclarationStructure = {
-    //   kind: StructureKind.Interface,
-    //   name: ifaceName,
-    //   callSignatures: [],
-    // };
-
-    // builders[field.name] = iface;
-
     const comment: JSDocStructure = {
       kind: StructureKind.JSDoc,
       description: field.description ?? "",
@@ -301,7 +292,7 @@ function builderFunctionsForInlineFragments(
       typeParameters: [
         {
           name: "Fragment",
-          constraint: "FragmentDefinition<any, any, any>",
+          constraint: "FragmentDefinition",
         },
       ],
       parameters: [
@@ -318,7 +309,7 @@ function builderFunctionsForInlineFragments(
       typeParameters: [
         {
           name: "Fragment",
-          constraint: "FragmentDefinitionWithVariables<any, any, any>",
+          constraint: "FragmentDefinitionWithVariables",
         },
       ],
       parameters: [
@@ -328,7 +319,7 @@ function builderFunctionsForInlineFragments(
         },
         {
           name: "variables",
-          type: "Fragment extends FragmentDefinitionWithVariables<any, any, infer V, any> ? V : never",
+          type: "Fragment extends FragmentDefinitionWithVariables<any, any, any, infer V, any> ? V : never",
         },
       ],
       returnType: `FragmentSpread<Fragment>`,
@@ -805,7 +796,7 @@ async function generateForSchema(
                 type: `(b: Builder_${type.name}) => Result`,
               },
             ],
-            returnType: `FragmentDefinition<${possibleTypes}, "${type.name}", SelectionSetOutput<Result, ${possibleTypes}>>`,
+            returnType: `FragmentDefinition<Name, ${possibleTypes}, "${type.name}", SelectionSetOutput<Result, ${possibleTypes}>>`,
           });
           callSignatures.push({
             kind: StructureKind.CallSignature,
@@ -843,7 +834,7 @@ async function generateForSchema(
                 `,
               },
             ],
-            returnType: `FragmentDefinitionWithVariables<${possibleTypes}, "${type.name}", {
+            returnType: `FragmentDefinitionWithVariables<Name, ${possibleTypes}, "${type.name}", {
               [K in keyof Variables]: AllowNonNullableVariables<ParseVariableDef<Variables[K]>>
             }, SelectionSetOutput<Result, ${possibleTypes}>, {
               [K in keyof Variables]: VariableInput<ParseVariableDef<Variables[K]>>
