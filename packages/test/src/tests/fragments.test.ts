@@ -18,7 +18,6 @@ describe("Fragments refs", () => {
       ]),
     ]);
     const output = "" as any as OutputOf<typeof q>;
-    type Ref = FragmentRef<typeof f_a>;
     function assertFragmentRef(_: FragmentRef<typeof f_a> | null) {}
     assertFragmentRef(output.user);
   });
