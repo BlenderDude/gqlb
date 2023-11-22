@@ -94,15 +94,6 @@ function methodsForFields(
   const fields = Object.values(fieldMap);
 
   for (const field of fields) {
-    // const ifaceName = `Builder_${name}_field_${field.name}`;
-    // const iface: InterfaceDeclarationStructure = {
-    //   kind: StructureKind.Interface,
-    //   name: ifaceName,
-    //   callSignatures: [],
-    // };
-
-    // builders[field.name] = iface;
-
     const comment: JSDocStructure = {
       kind: StructureKind.JSDoc,
       description: field.description ?? "",

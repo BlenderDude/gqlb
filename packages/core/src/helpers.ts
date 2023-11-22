@@ -58,13 +58,25 @@ export type FragmentName<
   ? N
   : never;
 
+export type FragmentRefObj<
+  T extends FragmentDefinition | FragmentDefinitionWithVariables,
+> = {
+  readonly [FragmentRefKey]: FragmentName<T>;
+};
+
 export type FragmentRef<
   T extends FragmentDefinition | FragmentDefinitionWithVariables,
-> = OutputOf<T> extends infer U ? U & FragmentRef<T> : never;
+> = FragmentData<T> extends infer U
+  ? IntersectWithFragmentRefUnion<U, FragmentRefObj<T>>
+  : never;
 
 export type FragmentData<
   T extends FragmentDefinition | FragmentDefinitionWithVariables,
-> = OutputOf<T>;
+> = T extends FragmentDefinition<any, any, any, infer O>
+  ? O
+  : T extends FragmentDefinitionWithVariables<any, any, any, any, infer O>
+    ? O
+    : never;
 
 export type FragmentOutput<
   T extends
@@ -74,12 +86,12 @@ export type FragmentOutput<
   PT extends string,
 > = NeverToEmptyObj<
   Extract<
-    SelectionOutput<T> &
-      (T extends FragmentDefinition | FragmentDefinitionWithVariables
-        ? {
-            readonly [FragmentRefKey]: FragmentName<T>;
-          }
-        : never),
+    IntersectWithFragmentRefUnion<
+      SelectionOutput<T>,
+      T extends FragmentDefinition | FragmentDefinitionWithVariables
+        ? FragmentRefObj<T>
+        : {}
+    >,
     { readonly __typename: PT }
   >
 >;
