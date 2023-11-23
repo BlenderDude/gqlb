@@ -7,7 +7,7 @@ import {
   Operation,
 } from "./runtime";
 
-declare const FragmentRefKey: unique symbol;
+export declare const FragmentRefKey: unique symbol;
 
 export type ResponseKey<F extends Field> = F extends Field<
   infer Name,
@@ -66,9 +66,7 @@ export type FragmentRefObj<
 
 export type FragmentRef<
   T extends FragmentDefinition | FragmentDefinitionWithVariables,
-> = FragmentData<T> extends infer U
-  ? IntersectWithFragmentRefUnion<U, FragmentRefObj<T>>
-  : never;
+> = IntersectWithFragmentRefUnion<FragmentData<T>, FragmentRefObj<T>>;
 
 export type FragmentData<
   T extends FragmentDefinition | FragmentDefinitionWithVariables,
@@ -96,12 +94,17 @@ export type FragmentOutput<
   >
 >;
 
-type IntersectWithFragmentRefUnion<A, B> = Omit<A, typeof FragmentRefKey> &
-  Omit<B, typeof FragmentRefKey> & {
-    [FragmentRefKey]:
-      | A[typeof FragmentRefKey & keyof A]
-      | B[typeof FragmentRefKey & keyof B];
-  };
+type IntersectWithFragmentRefUnion<A, B> = {
+  readonly [K in keyof A | keyof B]: K extends typeof FragmentRefKey
+    ? A[keyof A & typeof FragmentRefKey] | B[keyof B & typeof FragmentRefKey]
+    : K extends keyof A
+      ? K extends keyof B
+        ? A[K] | B[K]
+        : A[K]
+      : K extends keyof B
+        ? B[K]
+        : never;
+};
 
 export type BuildSelectionSet<
   T extends ReadonlyArray<SelectionSetSelection>,

@@ -14,7 +14,7 @@ import {
   type SelectionNode,
   parseType,
 } from "graphql";
-import { SelectionSetSelection } from "./helpers";
+import { FragmentData, FragmentRefKey, SelectionSetSelection } from "./helpers";
 
 type Field_ArgumentsArg = Record<string, unknown>;
 type Field_BuilderArg = (

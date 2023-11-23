@@ -498,6 +498,7 @@ async function generateForSchema(
     namedImports: [
       "Field",
       "InlineFragment",
+      "FragmentRefKey",
       "FragmentSpread",
       "FragmentDefinition",
       "FragmentDefinitionWithVariables",
@@ -849,6 +850,7 @@ async function generateForSchema(
 
   const rootBuilderTypes: Record<string, string> = {
     fragment: fragmentBuilderIfaceName,
+    anyFragment: `{ [FragmentRefKey]: any }`,
   };
 
   const queryType = schema.getQueryType();
