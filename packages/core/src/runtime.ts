@@ -15,7 +15,7 @@ import {
   SelectionNode,
   print,
 } from "graphql";
-import { SelectionSetSelection } from "./helpers";
+import { SelectionSetSelection, EnumValueSymbol, EnumValue } from "./helpers";
 
 type Field_ArgumentsArg = Record<string, unknown>;
 type Field_BuilderArg = (
@@ -165,6 +165,12 @@ function makeValueNode(value: unknown): ValueNode {
     if (variableSymbol in value) {
       return value[variableSymbol] as VariableNode;
     }
+    if (EnumValueSymbol in value) {
+      return {
+        kind: "EnumValue" as Kind.ENUM,
+        value: String(value[EnumValueSymbol]),
+      };
+    }
     return {
       kind: "ObjectValue" as Kind.OBJECT,
       fields: Object.entries(value).map(([name, value]) => ({
@@ -186,14 +192,12 @@ function createSelectionSet(
   const nodes: SelectionNode[] = [
     {
       kind: "Field" as Kind.FIELD,
-      alias: undefined,
       arguments: [],
       directives: [],
       name: {
         kind: "Name" as Kind.NAME,
         value: "__typename",
       },
-      selectionSet: undefined,
     },
   ];
   nodes.push(
@@ -253,16 +257,18 @@ export class Field<
         value: this.name,
       },
       directives: [],
-      alias: this._alias
+      ...(this._alias
         ? {
-            kind: "Name" as Kind.NAME,
-            value: this._alias,
+            alias: {
+              kind: "Name" as Kind.NAME,
+              value: this._alias,
+            },
           }
-        : undefined,
+        : {}),
       arguments: this.args,
-      selectionSet: this.selections
-        ? createSelectionSet(this.selections)
-        : undefined,
+      ...(this.selections
+        ? { selectionSet: createSelectionSet(this.selections) }
+        : {}),
     };
   }
 }
@@ -354,7 +360,7 @@ export class FragmentDefinition<
   constructor(
     public readonly name: Name,
     public readonly typeCondition: TypeCondition,
-    private selections: ReadonlyArray<SelectionSetSelection>
+    private selections: () => ReadonlyArray<SelectionSetSelection>
   ) {
     super();
   }
@@ -364,7 +370,7 @@ export class FragmentDefinition<
       return;
     }
     map.set(this.name, this);
-    for (const selection of this.selections) {
+    for (const selection of this.selections()) {
       selection.collectFragments(map);
     }
   }
@@ -383,7 +389,7 @@ export class FragmentDefinition<
           value: this.typeCondition,
         },
       },
-      selectionSet: createSelectionSet(this.selections)!,
+      selectionSet: createSelectionSet(this.selections())!,
     };
   }
 
@@ -617,7 +623,7 @@ export class Operation<const Output = any, const Variables = any> {
     public readonly name: string,
     public readonly type: "query" | "mutation" | "subscription",
     public readonly variableDefinitions: ReadonlyArray<VariableDefinitionNode>,
-    public readonly selections: ReadonlyArray<SelectionSetSelection>
+    public readonly selections: () => ReadonlyArray<SelectionSetSelection>
   ) {}
 
   document(): TypedDocumentNode<Output, Variables> {
@@ -626,7 +632,7 @@ export class Operation<const Output = any, const Variables = any> {
       return cached;
     }
     const fragmentMap = new FragmentMap();
-    for (const selection of this.selections) {
+    for (const selection of this.selections()) {
       selection.collectFragments(fragmentMap);
     }
     const document = {
@@ -642,7 +648,7 @@ export class Operation<const Output = any, const Variables = any> {
           },
           operation: this.type as OperationTypeNode,
           variableDefinitions: this.variableDefinitions,
-          selectionSet: createSelectionSet(this.selections),
+          selectionSet: createSelectionSet(this.selections()),
         },
       ],
     } as TypedDocumentNode<Output, Variables>;
@@ -738,6 +744,12 @@ function makeBuilderObject(): BuilderObject {
 
 const variableSymbol = Symbol.for("variable");
 
+export function enumValue<T extends string>(value: T): EnumValue<T> {
+  return {
+    [EnumValueSymbol]: value,
+  };
+}
+
 type Operation_VariablesArg = Record<string, string>;
 type Operation_BuilderArg = (
   b: BuilderObject,
@@ -757,7 +769,6 @@ function makeOperationBuilder(type: OperationTypeNode) {
       for (const [name, type] of Object.entries(arg1)) {
         variableDefinitions.push({
           kind: "VariableDefinition" as Kind.VARIABLE_DEFINITION,
-          defaultValue: undefined,
           directives: [],
           variable: {
             kind: "Variable" as Kind.VARIABLE,
@@ -779,8 +790,9 @@ function makeOperationBuilder(type: OperationTypeNode) {
       builder = arg1;
     }
 
-    const selections = builder(makeBuilderObject(), variables);
-    return new Operation(name, type, variableDefinitions, selections);
+    return new Operation(name, type, variableDefinitions, () =>
+      builder(makeBuilderObject(), variables)
+    );
   };
 }
 
@@ -840,8 +852,9 @@ function makeFragmentBuilder() {
         (v) => builder(makeBuilderObject(), v)
       );
     }
-    const selections = builder(makeBuilderObject(), variables);
-    return new FragmentDefinition(name, typeCondition, selections);
+    return new FragmentDefinition(name, typeCondition, () =>
+      builder(makeBuilderObject(), variables)
+    );
   };
 }
 

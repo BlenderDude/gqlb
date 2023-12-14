@@ -79,7 +79,7 @@ function argumentUnion(type: GraphQLInputType): string {
     return `Scalar_${type.name}["_input"] | null`;
   }
   if (type instanceof GraphQLEnumType) {
-    return `Enum_${type.name}["_input"] | null`;
+    return `EnumValue<Enum_${type.name}["_input"]> | null`;
   }
   if (type instanceof GraphQLInputObjectType) {
     return `InputObject_${type.name}_Variables | null`;
@@ -505,6 +505,7 @@ async function generateForSchema(
       "SelectionSetOutput",
       "SelectionOutput",
       "SelectionSetSelection",
+      "EnumValue",
     ],
     isTypeOnly: true,
   });

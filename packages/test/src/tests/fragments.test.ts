@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import { b } from "../generated/test_01/b";
-import { FragmentRef, OutputOf } from "@gqlb/core";
+import { OutputOf } from "@gqlb/core";
 
 describe("Fragments refs", () => {
   it("should produce a fragment ref", () => {
@@ -18,7 +18,7 @@ describe("Fragments refs", () => {
       ]),
     ]);
     const output = "" as any as OutputOf<typeof q>;
-    function assertFragmentRef(_: FragmentRef<typeof f_a> | null) {}
-    assertFragmentRef(output.user);
+    // function assertFragmentRef(_: FragmentRef<typeof f_a> | null) {}
+    // assertFragmentRef(output.user);
   });
 });

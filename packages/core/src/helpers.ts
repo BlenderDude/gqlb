@@ -7,8 +7,6 @@ import {
   Operation,
 } from "./runtime";
 
-declare const FragmentRefKey: unique symbol;
-
 export type ResponseKey<F extends Field> = F extends Field<
   infer Name,
   infer Alias
@@ -58,18 +56,6 @@ export type FragmentName<
   ? N
   : never;
 
-export type FragmentRefObj<
-  T extends FragmentDefinition | FragmentDefinitionWithVariables,
-> = {
-  readonly [FragmentRefKey]: FragmentName<T>;
-};
-
-export type FragmentRef<
-  T extends FragmentDefinition | FragmentDefinitionWithVariables,
-> = FragmentData<T> extends infer U
-  ? IntersectWithFragmentRefUnion<U, FragmentRefObj<T>>
-  : never;
-
 export type FragmentData<
   T extends FragmentDefinition | FragmentDefinitionWithVariables,
 > = T extends FragmentDefinition<any, any, any, infer O>
@@ -84,24 +70,17 @@ export type FragmentOutput<
     | FragmentDefinition
     | FragmentDefinitionWithVariables,
   PT extends string,
-> = NeverToEmptyObj<
-  Extract<
-    IntersectWithFragmentRefUnion<
-      SelectionOutput<T>,
-      T extends FragmentDefinition | FragmentDefinitionWithVariables
-        ? FragmentRefObj<T>
-        : {}
-    >,
-    { readonly __typename: PT }
-  >
->;
+> = NeverToEmptyObj<Extract<SelectionOutput<T>, { readonly __typename: PT }>>;
 
-type IntersectWithFragmentRefUnion<A, B> = Omit<A, typeof FragmentRefKey> &
-  Omit<B, typeof FragmentRefKey> & {
-    [FragmentRefKey]:
-      | A[typeof FragmentRefKey & keyof A]
-      | B[typeof FragmentRefKey & keyof B];
-  };
+type ReadonlyMerge<A, B> = A extends Function
+  ? never
+  : {
+      readonly [K in keyof A | keyof B]: K extends keyof A
+        ? A[K]
+        : K extends keyof B
+          ? B[K]
+          : never;
+    };
 
 export type BuildSelectionSet<
   T extends ReadonlyArray<SelectionSetSelection>,
@@ -122,11 +101,7 @@ export type BuildSelectionSet<
     : Head extends FragmentSpread<
           infer F extends FragmentDefinition | FragmentDefinitionWithVariables
         >
-      ? BuildSelectionSet<
-          Tail,
-          PT,
-          IntersectWithFragmentRefUnion<Acc, FragmentOutput<F, PT>>
-        >
+      ? BuildSelectionSet<Tail, PT, ReadonlyMerge<Acc, FragmentOutput<F, PT>>>
       : Head extends InlineFragment
         ? BuildSelectionSet<Tail, PT, Acc & FragmentOutput<Head, PT>>
         : never
@@ -143,9 +118,19 @@ export type SelectionSetOutput<
 
 export type OutputOf<T> = T extends Operation<infer Output>
   ? Output
-  : SelectionOutput<T>;
+  : T extends FragmentDefinitionWithVariables<any, any, any, infer Output>
+    ? Output
+    : T extends FragmentDefinition<any, any, any, infer Output>
+      ? Output
+      : SelectionOutput<T>;
+
 export type VariablesOf<T> = T extends Operation<any, infer Variables>
   ? Variables
   : T extends FragmentDefinitionWithVariables<any, any, any, infer Variables>
     ? Variables
     : never;
+
+export const EnumValueSymbol = Symbol("EnumValue");
+export type EnumValue<T> = {
+  readonly [EnumValueSymbol]: T;
+};
