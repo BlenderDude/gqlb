@@ -1,5 +1,11 @@
 # @gqlb/cli
 
+## 0.0.7
+
+### Patch Changes
+
+- 1cd50fb: Fixed intersection issue for output types
+
 ## 0.0.6
 
 ### Patch Changes
