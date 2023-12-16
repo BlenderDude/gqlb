@@ -72,16 +72,6 @@ export type FragmentOutput<
   PT extends string,
 > = NeverToEmptyObj<Extract<SelectionOutput<T>, { readonly __typename: PT }>>;
 
-type ReadonlyMerge<A, B> = A extends Function
-  ? never
-  : {
-      readonly [K in keyof A | keyof B]: K extends keyof A
-        ? A[K]
-        : K extends keyof B
-          ? B[K]
-          : never;
-    };
-
 export type BuildSelectionSet<
   T extends ReadonlyArray<SelectionSetSelection>,
   PT extends string,
@@ -101,7 +91,7 @@ export type BuildSelectionSet<
     : Head extends FragmentSpread<
           infer F extends FragmentDefinition | FragmentDefinitionWithVariables
         >
-      ? BuildSelectionSet<Tail, PT, ReadonlyMerge<Acc, FragmentOutput<F, PT>>>
+      ? BuildSelectionSet<Tail, PT, Acc & FragmentOutput<F, PT>>
       : Head extends InlineFragment
         ? BuildSelectionSet<Tail, PT, Acc & FragmentOutput<Head, PT>>
         : never
@@ -118,11 +108,7 @@ export type SelectionSetOutput<
 
 export type OutputOf<T> = T extends Operation<infer Output>
   ? Output
-  : T extends FragmentDefinitionWithVariables<any, any, any, infer Output>
-    ? Output
-    : T extends FragmentDefinition<any, any, any, infer Output>
-      ? Output
-      : SelectionOutput<T>;
+  : SelectionOutput<T>;
 
 export type VariablesOf<T> = T extends Operation<any, infer Variables>
   ? Variables
