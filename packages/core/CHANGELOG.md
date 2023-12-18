@@ -1,5 +1,11 @@
 # @gqlb/core
 
+## 0.0.8
+
+### Patch Changes
+
+- 6874041: Fixed bug with deeply nested array intersection
+
 ## 0.0.7
 
 ### Patch Changes
