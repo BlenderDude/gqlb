@@ -20,11 +20,15 @@ export type ResponseKeyObj<F extends Field, O> = {
   [K in ResponseKey<F>]: O;
 };
 
-export type ReadonlyIntersectionCollapse<T> = T extends Function
-  ? never
-  : {
-      readonly [K in keyof T]: T[K];
-    };
+type InterfaceCollapse<T> = T extends Record<string, any>
+  ? {
+      readonly [K in keyof T]: T[K] extends ReadonlyArray<Record<string, any>>
+        ? readonly InterfaceCollapse<T[K][number]>[]
+        : InterfaceCollapse<T[K]>;
+    }
+  : T extends ReadonlyArray<infer U>
+    ? ReadonlyArray<InterfaceCollapse<U>>
+    : T;
 
 export type SelectionOutput<T> = T extends Field<any, any, infer O>
   ? O
@@ -100,11 +104,13 @@ export type BuildSelectionSet<
 export type SelectionSetOutput<
   T extends ReadonlyArray<SelectionSetSelection>,
   PossibleTypes extends string,
-> = T extends Function
-  ? never
-  : PossibleTypes extends infer PT
-    ? ReadonlyIntersectionCollapse<BuildSelectionSet<T, PT & string>>
-    : never;
+> = InterfaceCollapse<
+  T extends Function
+    ? never
+    : PossibleTypes extends infer PT
+      ? BuildSelectionSet<T, PT & string>
+      : never
+>;
 
 export type OutputOf<T> = T extends Operation<infer Output>
   ? Output
