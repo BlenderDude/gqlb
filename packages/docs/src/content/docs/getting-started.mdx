@@ -114,11 +114,11 @@ query ListCountries {
 
 At each stage of this query, the `b` object is fully typed and scoped to and will only allow you to call functions that correspond to actual fields in the API's schema. This makes it impossible to write invalid queries.
 
-```ts del="numStarbucksLocations()"
+```ts del="numChipotleLocations()"
 const LIST_COUNTRIES_QUERY = b.query("ListCountries", (b) => [
   b.countries((b) => [
     b.code(),
-    b.numStarbucksLocations(), // this would result in a TS error
+    b.numChipotleLocations(), // this would result in a TS error
   ]),
 ]);
 ```
