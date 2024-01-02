@@ -1,0 +1,153 @@
+---
+title: Getting started
+---
+
+GQLB is a statically typed GraphQL query builder for TypeScript. It ensures the validity of every GraphQL operation you write, and adds type information to the input and output of your operations.
+
+This guide will help you get started with GQLB, so you can experience the magic of _static_ type safety in a GraphQL app.
+
+## Installation
+
+Run the following command in your terminal to install the GQLB CLI and client runtime:
+
+```bash npm2yarn
+npm install -D @gqlb/cli
+npm install @gqlb/core graphql
+```
+
+## Configuration
+
+Next, create a file at your project root called `gqlb.config.ts`. This file will be used to configure the GQLB CLI.
+
+We need to let GQLB know what GraphQL schema(s) we're going to be working with. In this guide, we'll use Trevor Blades's [Countries API](https://countries.trevorblades.com) as an example.
+
+The default export of your config file should be an object with a `generate` property. This object maps unique strings to a configuration object for each API.
+
+```ts file="../../gqlb.config.ts" twoslash
+```
+
+In this example, we configure the Countries API under the key `countries` (this can be anything), and set the `schema.introspect` property to the API URL. The `output` property is also set to `src/gql`, indicating which directory the generated code will live in.
+
+This directory should not be checked in to version control. Be sure to add any output directories to your `.gitignore` file.
+
+## Usage
+
+Add a script to your `package.json` that calls `gqlb generate`.
+
+```json
+// package.json
+{
+  "scripts": {
+    "gql": "gqlb generate"
+  }
+}
+```
+
+Run the `generate` command using the GQLB CLI. This will read the type information from a GraphQL schema, and use it to generate a typed query builder at the configured `output` location.
+
+```bash npm2yarn
+npm run gql
+```
+
+### Writing a query
+
+Now, let's build a GraphQL query using the `b` object exported from the generated `src/gql` directory. We'll call the `query` function on the `b` object, supplying the query name `ListCountries` as the first parameter, and a function as the second parameter.
+
+This function takes a scoped `b` instance and must return an array of field selections. If a field requires sub-selections, repeat this function pattern as an argument passed to that field.
+
+```twoslash include gql-index file="../gql/index.ts"
+```
+
+```twoslash include gql-builder file="../gql/builder.d.ts"
+```
+
+```twoslash include gql-types file="../gql/types.d.ts"
+```
+
+```ts twoslash
+// @noErrors
+// @filename: gql/builder.d.ts
+// @include: gql-builder
+
+// @filename: gql/types.d.ts
+// @include: gql-types
+
+// @filename: gql/index.ts
+// @include: gql-index
+
+// @filename: index.ts
+// ---cut---
+import { b } from "./gql";
+
+const LIST_COUNTRIES_QUERY = b.query("ListCountries", (b) => [
+  b.countries((b) => [
+    b.code(),
+    b.name(),
+    b.c
+//     ^|
+  ]),
+]);
+```
+
+The query above would produce the following GraphQL query:
+
+```graphql
+query ListCountries {
+  countries {
+    code
+    name
+  }
+}
+```
+
+At each stage of this query, the `b` object is fully typed and scoped to and will only allow you to call functions that correspond to actual fields in the API's schema. This makes it impossible to write invalid queries.
+
+```ts
+// @errors: 2304 7006
+const LIST_COUNTRIES_QUERY = b.query("ListCountries", (b) => [
+  b.countries((b) => [
+    b.code(),
+    b.numChipotleLocations(), // this would result in a TS error
+  ]),
+]);
+```
+
+### Making a request
+
+To execute a query, call the `document` function on the query object and pass that to your preferred GraphQL client. In this example, we're using the `graphql-request` library to make a one-off request to the Countries API.
+
+```ts
+// @errors: 2307 1109
+import { b } from "./gql";
+import { request } from "graphql-request";
+
+const LIST_COUNTRIES_QUERY = b.query(...)
+
+const data = await request(
+  "https://countries.trevorblades.com",
+  LIST_COUNTRIES_QUERY.document()
+);
+
+console.log(data.countries[0]); // { name: "Andorra", code: "AD" }
+```
+
+The `data` object in the code above is fully typed to match the response you'd get back from the API server. If you hovered over it in VS Code, you'd see the following type definition in its tooltip:
+
+```ts
+// @errors: 1155
+const data: {
+  readonly __typename: "Query";
+  readonly countries: {
+    readonly __typename: "Country";
+    readonly code: string;
+    readonly name: string;
+  }[];
+}
+```
+
+If you tried to access `data.whatever`, TypeScript would bark at you, saying "Property 'whatever' does not exist...". This is a huge developer experience win, because it prevents you
+from writing certain types of faulty code without having to define any types manually.
+
+## Next steps
+
+That wraps up the very basics of installing, configuring, and using GQLB in a TypeScript project. Next, we'll discuss using variables in your GraphQL queries.

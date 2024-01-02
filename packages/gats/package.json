@@ -1,0 +1,43 @@
+{
+  "name": "gqlb",
+  "version": "1.0.0",
+  "private": true,
+  "description": "gqlb",
+  "author": "Trevor Blades",
+  "keywords": [
+    "gatsby"
+  ],
+  "scripts": {
+    "develop": "gatsby develop",
+    "start": "gatsby develop",
+    "build": "gatsby build",
+    "serve": "gatsby serve",
+    "clean": "gatsby clean",
+    "typecheck": "tsc --noEmit",
+    "gql": "gqlb generate"
+  },
+  "dependencies": {
+    "@gqlb/core": "workspace:^",
+    "@mdx-js/react": "^3.0.0",
+    "autoprefixer": "^10.4.16",
+    "gatsby": "^5.13.0",
+    "gatsby-plugin-mdx": "^5.13.0",
+    "gatsby-plugin-pnpm": "^1.2.10",
+    "gatsby-plugin-postcss": "^6.13.0",
+    "gatsby-remark-import-code": "^0.1.1",
+    "gatsby-remark-shiki-twoslash": "^3.0.38",
+    "gatsby-source-filesystem": "^5.13.0",
+    "postcss": "^8.4.32",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "remark-code-import": "^1.2.0",
+    "tailwindcss": "^3.4.0"
+  },
+  "devDependencies": {
+    "@gqlb/cli": "workspace:^",
+    "@types/node": "^20.3.3",
+    "@types/react": "^18.2.14",
+    "@types/react-dom": "^18.2.6",
+    "typescript": "^5.1.6"
+  }
+}
