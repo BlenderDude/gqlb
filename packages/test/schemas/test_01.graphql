@@ -1,5 +1,3 @@
-
-
 type Image {
   url(size: Int!): String!
 }
@@ -31,7 +29,7 @@ type User implements Node {
   name: String!
   email: String!
   avatar: Image!
-  cart(first: Int after: String): CartConnection!
+  cart(first: Int, after: String): CartConnection!
 }
 
 type Product implements Node {
@@ -58,6 +56,7 @@ type Query {
   product(id: String!): Product
   products: [Product]
   viewer: User!
+  fieldWithDefaultArgs(arg1: String = "default"): String!
 }
 
 type UserMutation {
@@ -67,5 +66,3 @@ type UserMutation {
 type Mutation {
   user: UserMutation!
 }
-
-
