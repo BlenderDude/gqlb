@@ -18,6 +18,7 @@ import {
   buildClientSchema,
   buildSchema,
   getIntrospectionQuery,
+  isRequiredArgument,
 } from "graphql";
 import request from "graphql-request";
 import path from "path";
@@ -145,7 +146,7 @@ function methodsForFields(
       if (hasAnyArgs) {
         const argumentType = `{
             ${field.args.map((arg) => {
-              const optional = arg.type instanceof GraphQLNonNull ? "" : "?";
+              const optional = isRequiredArgument(arg) ? "" : "?";
               return `readonly ${arg.name}${optional}: ${argumentUnion(
                 arg.type
               )} | ${variableUnion(arg.type)}`;
