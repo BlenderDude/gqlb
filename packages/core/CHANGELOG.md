@@ -1,5 +1,7 @@
 # @gqlb/core
 
+## 0.1.0
+
 ## 0.0.8
 
 ### Patch Changes
