@@ -1,5 +1,11 @@
 # @gqlb/cli
 
+## 0.1.0
+
+### Minor Changes
+
+- bedbf97: Added support for optional args
+
 ## 0.0.8
 
 ## 0.0.7
