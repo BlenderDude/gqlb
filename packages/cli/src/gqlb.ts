@@ -1,25 +1,18 @@
 #!/usr/bin/env node
-import { convert } from "./commands/convert";
-import { generate } from "./commands/generate";
+import { program } from "commander";
 
 async function main() {
-  const command = process.argv[2];
-  if (!command) {
-    console.error("No command specified");
-    console.log("Usage: gqlb <generate|convert>");
-    process.exit(1);
-  }
+	program.name("gqlb").description("GraphQL Build tool").version("0.1.0");
 
-  switch (command) {
-    case "generate":
-      return generate();
-    case "convert":
-      return convert();
-    default:
-      console.error(`Unknown command: ${command}`);
-      console.log("Usage: gqlb <generate|convert>");
-      process.exit(1);
-  }
+	program
+		.command("generate")
+		.description("Generate TypeScript types from GraphQL schema")
+		.action(async () => {
+			const { generate } = await import("./commands/generate");
+			await generate();
+		});
+
+	await program.parseAsync(process.argv);
 }
 
 void main();

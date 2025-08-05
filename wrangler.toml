@@ -1,0 +1,10 @@
+name = "gqlb"
+compatibility_date = "2025-04-01"
+
+[assets]
+directory = "./packages/docs/.vitepress/dist"
+not_found_handling = "single-page-application"
+
+[build]
+command = "pnpm docs:build"
+cwd = "./packages/docs"

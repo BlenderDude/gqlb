@@ -1,19 +1,19 @@
-import { describe, test, it } from "node:test";
+import assert from "node:assert/strict";
+import { test } from "node:test";
 import { parse, print } from "graphql";
 import { b } from "../generated/test_01/b";
-import assert from "node:assert/strict";
 
 test("basic query operation", () => {
-  const QUERY = b.query("BasicQuery", (b) => [
-    //
-    b.viewer((b) => [
-      //
-      b.name(),
-    ]),
-  ]);
+	const QUERY = b.query("BasicQuery", (b) => [
+		//
+		b.viewer((b) => [
+			//
+			b.name(),
+		]),
+	]);
 
-  const expected = parse(
-    `
+	const expected = parse(
+		`
     query BasicQuery {
       __typename
       viewer {
@@ -22,25 +22,25 @@ test("basic query operation", () => {
       }
     }
   `,
-    {
-      noLocation: true,
-    }
-  );
+		{
+			noLocation: true,
+		},
+	);
 
-  assert.strictEqual(print(QUERY.document()), print(expected));
+	assert.strictEqual(print(QUERY.document()), print(expected));
 });
 
 test("basic query operation with variables", () => {
-  const QUERY = b.query("BasicQuery", { id: "String!" }, (b, v) => [
-    //
-    b.user({ id: v.id }, (b) => [
-      //
-      b.name(),
-    ]),
-  ]);
+	const QUERY = b.query("BasicQuery", { id: "String!" }, (b, v) => [
+		//
+		b.user({ id: v.id }, (b) => [
+			//
+			b.name(),
+		]),
+	]);
 
-  const expected = parse(
-    `
+	const expected = parse(
+		`
     query BasicQuery($id: String!) {
       __typename
       user(id: $id) {
@@ -49,10 +49,10 @@ test("basic query operation with variables", () => {
       }
     }
   `,
-    {
-      noLocation: true,
-    }
-  );
+		{
+			noLocation: true,
+		},
+	);
 
-  assert.strictEqual(print(QUERY.document()), print(expected));
+	assert.strictEqual(print(QUERY.document()), print(expected));
 });

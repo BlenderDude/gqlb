@@ -1,25 +1,25 @@
 {
-  "name": "@gqlb/core",
-  "version": "0.1.0",
-  "description": "",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "private": false,
-  "scripts": {
-    "build": "rimraf dist && tsc",
-    "prepublishOnly": "npm run build"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "devDependencies": {
-    "rimraf": "^5.0.5",
-    "typescript": "^5.2.2"
-  },
-  "peerDependencies": {
-    "graphql": "^16 || ^15"
-  },
-  "dependencies": {
-    "@graphql-typed-document-node/core": "^3.2.0"
-  }
+	"name": "@gqlb/core",
+	"version": "0.1.0",
+	"description": "",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"private": false,
+	"scripts": {
+		"build": "rimraf dist && tsc",
+		"prepublishOnly": "npm run build"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"devDependencies": {
+		"rimraf": "^5.0.5",
+		"typescript": "^5.2.2"
+	},
+	"peerDependencies": {
+		"graphql": "^16 || ^15"
+	},
+	"dependencies": {
+		"@graphql-typed-document-node/core": "^3.2.0"
+	}
 }

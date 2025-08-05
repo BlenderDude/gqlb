@@ -1,948 +1,727 @@
-import fs from "fs/promises";
+import fs from "node:fs/promises";
+import path from "node:path";
 import {
-  GraphQLEnumType,
-  GraphQLFieldMap,
-  GraphQLInputObjectType,
-  GraphQLInputType,
-  GraphQLInterfaceType,
-  GraphQLList,
-  GraphQLNamedType,
-  GraphQLNonNull,
-  GraphQLObjectType,
-  GraphQLOutputType,
-  GraphQLScalarType,
-  GraphQLSchema,
-  GraphQLType,
-  GraphQLUnionType,
-  IntrospectionQuery,
-  buildClientSchema,
-  buildSchema,
-  getIntrospectionQuery,
-  isRequiredArgument,
+	buildClientSchema,
+	buildSchema,
+	GraphQLEnumType,
+	type GraphQLField,
+	type GraphQLFieldMap,
+	GraphQLInputObjectType,
+	type GraphQLInputType,
+	GraphQLInterfaceType,
+	GraphQLList,
+	type GraphQLNamedType,
+	GraphQLNonNull,
+	GraphQLObjectType,
+	type GraphQLOutputType,
+	GraphQLScalarType,
+	GraphQLSchema,
+	type GraphQLType,
+	GraphQLUnionType,
+	getIntrospectionQuery,
+	type IntrospectionQuery,
+	isRequiredArgument,
 } from "graphql";
 import request from "graphql-request";
-import path from "path";
-import prettier from "prettier";
-import {
-  CallSignatureDeclarationStructure,
-  InterfaceDeclarationStructure,
-  JSDocStructure,
-  MethodSignatureStructure,
-  ModuleDeclarationKind,
-  ParameterDeclarationStructure,
-  Project,
-  StatementStructures,
-  StructureKind,
-  TypeParameterDeclarationStructure,
-} from "ts-morph";
-import { z } from "zod";
-import { loadConfig, schema } from "../helpers/config";
+import { loadConfig, type SchemaGenerationConfig } from "../helpers/config";
 import { getScalarTypes } from "../helpers/scalarTypes";
-import { makeTypesFile } from "../generate/makeTypesFile";
-import { makePossibleTypes } from "../generate/makePossibleTypes";
 
-function resolveToRootType(type: GraphQLType) {
-  if (type instanceof GraphQLList || type instanceof GraphQLNonNull) {
-    return resolveToRootType(type.ofType);
-  }
-  return type;
+function makeTypeString(
+	type: GraphQLOutputType,
+	parent: GraphQLOutputType | null = null,
+): string {
+	if (type instanceof GraphQLList) {
+		if (parent instanceof GraphQLNonNull) {
+			return `readonly ${makeTypeString(type.ofType, type)}[]`;
+		}
+		return `readonly ${makeTypeString(type.ofType, type)}[] | null`;
+	}
+	if (type instanceof GraphQLNonNull) {
+		return makeTypeString(type.ofType, type);
+	}
+	if (parent instanceof GraphQLNonNull) {
+		return type.name;
+	}
+	return `${type.name} | null`;
 }
 
-const project = new Project({
-  compilerOptions: {
-    strict: true,
-  },
-});
+function makeFieldProperty(field: GraphQLField<unknown, unknown>) {
+	return `readonly ${field.name}: ${makeTypeString(field.type)}`;
+}
+
+async function makeTypesFile(
+	schema: GraphQLSchema,
+	config: SchemaGenerationConfig,
+): Promise<string> {
+	const typeAliases: string[] = [];
+
+	for (const t of Object.values(schema.getTypeMap())) {
+		if (t.name.startsWith("__")) continue;
+
+		if (t instanceof GraphQLObjectType || t instanceof GraphQLInputObjectType) {
+			const fields = Object.values(t.getFields())
+				.map((f) => `  ${makeFieldProperty(f)};`)
+				.join("\n");
+
+			typeAliases.push(`export type ${t.name} = {
+${fields}
+};`);
+			continue;
+		}
+
+		if (t instanceof GraphQLUnionType) {
+			const unionTypes = t
+				.getTypes()
+				.map((t) => t.name)
+				.join(" | ");
+
+			typeAliases.push(`export type ${t.name} = ${unionTypes};`);
+			continue;
+		}
+
+		if (t instanceof GraphQLScalarType) {
+			const scalarTypes = getScalarTypes(config);
+			const scalarType = scalarTypes[t.name] ?? "unknown";
+
+			typeAliases.push(`export type ${t.name} = ${scalarType};`);
+			continue;
+		}
+
+		if (t instanceof GraphQLEnumType) {
+			const enumValues = t
+				.getValues()
+				.map((v) => `'${v.name}'`)
+				.join(" | ");
+
+			typeAliases.push(`export type ${t.name} = ${enumValues};`);
+			continue;
+		}
+
+		if (t instanceof GraphQLInterfaceType) {
+			const fields = Object.values(t.getFields())
+				.map((f) => `  ${makeFieldProperty(f)};`)
+				.join("\n");
+
+			const possibleTypes = schema
+				.getPossibleTypes(t)
+				.map((t) => t.name)
+				.join(" | ");
+
+			typeAliases.push(`export type ${t.name} = {
+${fields}
+} & (${possibleTypes});`);
+		}
+	}
+
+	return `export namespace types {
+${typeAliases.map((alias) => `  ${alias.replace(/\n/g, "\n  ")}`).join("\n\n")}
+}`;
+}
+
+function makePossibleTypes(schema: GraphQLSchema) {
+	const possibleTypes = Object.fromEntries(
+		Object.values(schema.getTypeMap())
+			.filter(
+				(t): t is GraphQLInterfaceType | GraphQLUnionType =>
+					t instanceof GraphQLInterfaceType || t instanceof GraphQLUnionType,
+			)
+			.map((t) => {
+				if (t instanceof GraphQLInterfaceType) {
+					return [
+						t.name,
+						schema.getPossibleTypes(t).map((t) => t.name),
+					] as const;
+				}
+				if (t instanceof GraphQLUnionType) {
+					return [t.name, t.getTypes().map((t) => t.name)] as const;
+				}
+				throw new Error("Expected interface or union type");
+			}),
+	);
+
+	return `export const possibleTypes = ${JSON.stringify(possibleTypes)};`;
+}
+
+function resolveToRootType(type: GraphQLType) {
+	if (type instanceof GraphQLList || type instanceof GraphQLNonNull) {
+		return resolveToRootType(type.ofType);
+	}
+	return type;
+}
 
 async function loadSchemaFromUrl(url: string) {
-  const result = await request<IntrospectionQuery>({
-    url,
-    document: getIntrospectionQuery({
-      descriptions: true,
-    }),
-  });
-  return buildClientSchema(result);
+	const result = await request<IntrospectionQuery>({
+		url,
+		document: getIntrospectionQuery({
+			descriptions: true,
+		}),
+	});
+	return buildClientSchema(result);
 }
 
 async function loadSchemaFromFile(path: string) {
-  const schema = await fs.readFile(path, "utf-8");
-  return buildSchema(schema);
+	const schema = await fs.readFile(path, "utf-8");
+	return buildSchema(schema);
 }
 
 function argumentUnion(type: GraphQLInputType): string {
-  if (type instanceof GraphQLNonNull) {
-    return `Exclude<${argumentUnion(type.ofType)}, null>`;
-  }
-  if (type instanceof GraphQLList) {
-    return `ReadonlyArray<${argumentUnion(type.ofType)}> | null`;
-  }
-  if (type instanceof GraphQLScalarType) {
-    return `Scalar_${type.name}["_input"] | null`;
-  }
-  if (type instanceof GraphQLEnumType) {
-    return `EnumValue<Enum_${type.name}["_input"]> | null`;
-  }
-  if (type instanceof GraphQLInputObjectType) {
-    return `InputObject_${type.name}_Variables | null`;
-  }
-  throw new Error("Unknown input type");
+	if (type instanceof GraphQLNonNull) {
+		return `Exclude<${argumentUnion(type.ofType)}, null>`;
+	}
+	if (type instanceof GraphQLList) {
+		return `ReadonlyArray<${argumentUnion(type.ofType)}> | null`;
+	}
+	if (type instanceof GraphQLScalarType) {
+		return `Scalar_${type.name}["_input"] | null`;
+	}
+	if (type instanceof GraphQLEnumType) {
+		return `EnumValue<Enum_${type.name}["_input"]> | null`;
+	}
+	if (type instanceof GraphQLInputObjectType) {
+		return `InputObject_${type.name}_Variables | null`;
+	}
+	throw new Error("Unknown input type");
 }
 
-function methodsForFields(
-  fieldMap: GraphQLFieldMap<any, any>
-): MethodSignatureStructure[] {
-  const methods: MethodSignatureStructure[] = [];
-  const fields = Object.values(fieldMap);
+function methodsForFields(fieldMap: GraphQLFieldMap<unknown, unknown>): string {
+	const methods: string[] = [];
+	const fields = Object.values(fieldMap);
 
-  for (const field of fields) {
-    const comment: JSDocStructure = {
-      kind: StructureKind.JSDoc,
-      description: field.description ?? "",
-      tags: [],
-    };
-    if (field.deprecationReason) {
-      comment.tags?.push({
-        tagName: "deprecated",
-        text: field.deprecationReason,
-      });
-    }
+	for (const field of fields) {
+		let jsdocComment = "";
+		if (field.description || field.deprecationReason) {
+			jsdocComment = "/**\n";
+			if (field.description) {
+				jsdocComment += `   * ${field.description}\n`;
+			}
+			if (field.deprecationReason) {
+				jsdocComment += `   * @deprecated ${field.deprecationReason}\n`;
+			}
+			jsdocComment += "   */\n  ";
+		}
 
-    const rootType = resolveToRootType(field.type);
-    const hasRequiredArg = field.args.some(
-      (arg) => arg.type instanceof GraphQLNonNull
-    );
-    const hasAnyArgs = field.args.length > 0;
+		const rootType = resolveToRootType(field.type);
+		const hasRequiredArg = field.args.some(
+			(arg) => arg.type instanceof GraphQLNonNull,
+		);
+		const hasAnyArgs = field.args.length > 0;
 
-    const wrap = (result: string, type: GraphQLOutputType): string => {
-      if (type instanceof GraphQLList) {
-        return `ReadonlyArray<${wrap(result, type.ofType)}> | null`;
-      }
-      if (type instanceof GraphQLNonNull) {
-        return `Exclude<${wrap(result, type.ofType)}, null>`;
-      }
-      return result;
-    };
+		const wrap = (result: string, type: GraphQLOutputType): string => {
+			if (type instanceof GraphQLList) {
+				return `ReadonlyArray<${wrap(result, type.ofType)}> | null`;
+			}
+			if (type instanceof GraphQLNonNull) {
+				return `Exclude<${wrap(result, type.ofType)}, null>`;
+			}
+			return result;
+		};
 
-    const result = (output: string, type: GraphQLOutputType) => {
-      return `Field<"${field.name}", undefined, ${wrap(
-        output + " | null",
-        type
-      )}>`;
-    };
+		const result = (output: string, type: GraphQLOutputType) => {
+			return `Field<"${field.name}", undefined, ${wrap(
+				`${output} | null`,
+				type,
+			)}>`;
+		};
 
-    if (
-      rootType instanceof GraphQLScalarType ||
-      rootType instanceof GraphQLEnumType
-    ) {
-      let output;
-      if (rootType instanceof GraphQLEnumType) {
-        output = `Enum_${rootType.name}["_output"]`;
-      } else if (rootType instanceof GraphQLScalarType) {
-        output = `Scalar_${rootType.name}["_output"]`;
-      } else {
-        throw new Error("Expected scalar or enum type");
-      }
+		if (
+			rootType instanceof GraphQLScalarType ||
+			rootType instanceof GraphQLEnumType
+		) {
+			let output: string;
+			if (rootType instanceof GraphQLEnumType) {
+				output = `Enum_${rootType.name}["_output"]`;
+			} else if (rootType instanceof GraphQLScalarType) {
+				output = `Scalar_${rootType.name}["_output"]`;
+			} else {
+				throw new Error("Expected scalar or enum type");
+			}
 
-      if (hasAnyArgs) {
-        const argumentType = `{
-            ${field.args.map((arg) => {
-              const optional = isRequiredArgument(arg) ? "" : "?";
-              return `readonly ${arg.name}${optional}: ${argumentUnion(
-                arg.type
-              )} | ${variableUnion(arg.type)}`;
-            })}
+			if (hasAnyArgs) {
+				const argumentType = `{
+            ${field.args
+							.map((arg) => {
+								const optional = isRequiredArgument(arg) ? "" : "?";
+								return `readonly ${arg.name}${optional}: ${argumentUnion(
+									arg.type,
+								)} | ${variableUnion(arg.type)}`;
+							})
+							.join(";\n            ")}
           }`;
-        methods.push({
-          kind: StructureKind.MethodSignature,
-          name: field.name,
-          docs: [comment],
-          parameters: [
-            {
-              name: "args",
-              type: argumentType,
-              hasQuestionToken: true,
-            },
-          ],
-          returnType: result(output, field.type),
-        });
-      } else {
-        methods.push({
-          kind: StructureKind.MethodSignature,
-          name: field.name,
-          docs: [comment],
-          returnType: result(output, field.type),
-        });
-      }
-    }
-    if (
-      rootType instanceof GraphQLObjectType ||
-      rootType instanceof GraphQLUnionType ||
-      rootType instanceof GraphQLInterfaceType
-    ) {
-      const builderTypeParameter: TypeParameterDeclarationStructure = {
-        kind: StructureKind.TypeParameter,
-        name: "BuilderResult",
-        constraint: makeSelectionResult(rootType),
-        isConst: true,
-      };
+				methods.push(
+					`${jsdocComment}${field.name}(args?: ${argumentType}): ${result(output, field.type)};`,
+				);
+			} else {
+				methods.push(
+					`${jsdocComment}${field.name}(): ${result(output, field.type)};`,
+				);
+			}
+		}
+		if (
+			rootType instanceof GraphQLObjectType ||
+			rootType instanceof GraphQLUnionType ||
+			rootType instanceof GraphQLInterfaceType
+		) {
+			const output = `SelectionSetOutput<BuilderResult, PossibleTypes_${rootType.name}>`;
 
-      const builderArgument: ParameterDeclarationStructure = {
-        kind: StructureKind.Parameter,
-        name: "builder",
-        type: `(b: Builder_${rootType.name}) => BuilderResult`,
-      };
-
-      const output = `SelectionSetOutput<BuilderResult, PossibleTypes_${rootType.name}>`;
-
-      if (hasAnyArgs) {
-        const argumentType = `{
+			if (hasAnyArgs) {
+				const argumentType = `{
           ${field.args
-            .map((arg) => {
-              const optional = arg.type instanceof GraphQLNonNull ? "" : "?";
-              return `readonly ${arg.name}${optional}: ${argumentUnion(
-                arg.type
-              )} | ${variableUnion(arg.type)}`;
-            })
-            .join(",\n")}
+						.map((arg) => {
+							const optional = arg.type instanceof GraphQLNonNull ? "" : "?";
+							return `readonly ${arg.name}${optional}: ${argumentUnion(
+								arg.type,
+							)} | ${variableUnion(arg.type)}`;
+						})
+						.join(";\n          ")}
         }`;
-        methods.push({
-          kind: StructureKind.MethodSignature,
-          name: field.name,
-          docs: [comment],
-          typeParameters: [builderTypeParameter],
-          parameters: [
-            {
-              name: "args",
-              type: argumentType,
-            },
-            builderArgument,
-          ],
-          returnType: result(output, field.type),
-        });
-        if (!hasRequiredArg) {
-          methods.push({
-            kind: StructureKind.MethodSignature,
-            name: field.name,
-            docs: [comment],
-            typeParameters: [builderTypeParameter],
-            parameters: [builderArgument],
-            returnType: result(output, field.type),
-          });
-        }
-      } else {
-        methods.push({
-          kind: StructureKind.MethodSignature,
-          name: field.name,
-          docs: [comment],
-          typeParameters: [builderTypeParameter],
-          parameters: [builderArgument],
-          returnType: result(output, field.type),
-        });
-      }
-    }
-  }
+				methods.push(
+					`${jsdocComment}${field.name}<const BuilderResult extends ${makeSelectionResult(rootType)}>(args: ${argumentType}, builder: (b: Builder_${rootType.name}) => BuilderResult): ${result(output, field.type)};`,
+				);
+				if (!hasRequiredArg) {
+					methods.push(
+						`${jsdocComment}${field.name}<const BuilderResult extends ${makeSelectionResult(rootType)}>(builder: (b: Builder_${rootType.name}) => BuilderResult): ${result(output, field.type)};`,
+					);
+				}
+			} else {
+				methods.push(
+					`${jsdocComment}${field.name}<const BuilderResult extends ${makeSelectionResult(rootType)}>(builder: (b: Builder_${rootType.name}) => BuilderResult): ${result(output, field.type)};`,
+				);
+			}
+		}
+	}
 
-  return methods;
+	return methods.join("\n  ");
 }
 
 function builderFunctionsForInlineFragments(
-  name: string,
-  schema: GraphQLSchema,
-  type: GraphQLObjectType | GraphQLInterfaceType | GraphQLUnionType
-): MethodSignatureStructure[] {
-  const methods: MethodSignatureStructure[] = [];
-  let possibleTypes: Array<
-    GraphQLObjectType | GraphQLInterfaceType | GraphQLUnionType
-  >;
-  if (type instanceof GraphQLObjectType) {
-    possibleTypes = [type];
-  } else if (type instanceof GraphQLInterfaceType) {
-    possibleTypes = [type, ...schema.getPossibleTypes(type)];
-  } else if (type instanceof GraphQLUnionType) {
-    possibleTypes = [type, ...type.getTypes()];
-  } else {
-    throw new Error("Expected object, interface, or union type");
-  }
-  for (const possibleType of possibleTypes) {
-    const ptType = `PossibleTypes_${possibleType.name}`;
-    methods.push({
-      kind: StructureKind.MethodSignature,
-      name: "__on",
-      typeParameters: [
-        {
-          name: "Result",
-          constraint: makeSelectionResult(possibleType),
-          isConst: true,
-        },
-      ],
-      parameters: [
-        {
-          name: "typeCondition",
-          type: `"${possibleType}"`,
-        },
-        {
-          name: "builder",
-          type: `(b: Builder_${possibleType}) => Result`,
-        },
-      ],
-      returnType: `InlineFragment<${ptType}, "${possibleType.name}", SelectionSetOutput<Result, ${ptType}>>`,
-    });
-    methods.push({
-      kind: StructureKind.MethodSignature,
-      name: "__fragment",
-      typeParameters: [
-        {
-          name: "Fragment",
-          constraint: "FragmentDefinition",
-        },
-      ],
-      parameters: [
-        {
-          name: "fragment",
-          type: "Fragment",
-        },
-      ],
-      returnType: `FragmentSpread<Fragment>`,
-    });
-    methods.push({
-      kind: StructureKind.MethodSignature,
-      name: "__fragment",
-      typeParameters: [
-        {
-          name: "Fragment",
-          constraint: "FragmentDefinitionWithVariables",
-        },
-      ],
-      parameters: [
-        {
-          name: "fragment",
-          type: "Fragment",
-        },
-        {
-          name: "variables",
-          type: "Fragment extends FragmentDefinitionWithVariables<any, any, any, infer V, any> ? V : never",
-        },
-      ],
-      returnType: `FragmentSpread<Fragment>`,
-    });
-  }
+	_name: string,
+	schema: GraphQLSchema,
+	type: GraphQLObjectType | GraphQLInterfaceType | GraphQLUnionType,
+): string {
+	const methods: string[] = [];
+	let possibleTypes: Array<
+		GraphQLObjectType | GraphQLInterfaceType | GraphQLUnionType
+	>;
+	if (type instanceof GraphQLObjectType) {
+		possibleTypes = [type];
+	} else if (type instanceof GraphQLInterfaceType) {
+		possibleTypes = [type, ...schema.getPossibleTypes(type)];
+	} else if (type instanceof GraphQLUnionType) {
+		possibleTypes = [type, ...type.getTypes()];
+	} else {
+		throw new Error("Expected object, interface, or union type");
+	}
+	for (const possibleType of possibleTypes) {
+		const ptType = `PossibleTypes_${possibleType.name}`;
+		methods.push(
+			`__on<const Result extends ${makeSelectionResult(possibleType)}>(typeCondition: "${possibleType.name}", builder: (b: Builder_${possibleType.name}) => Result): InlineFragment<${ptType}, "${possibleType.name}", SelectionSetOutput<Result, ${ptType}>>;`,
+		);
+		methods.push(
+			`__fragment<Fragment extends FragmentDefinition>(fragment: Fragment): FragmentSpread<Fragment>;`,
+		);
+		methods.push(
+			`__fragment<Fragment extends FragmentDefinitionWithVariables>(fragment: Fragment, variables: Fragment extends FragmentDefinitionWithVariables<any, any, any, infer V, any> ? V : never): FragmentSpread<Fragment>;`,
+		);
+	}
 
-  return methods;
+	return methods.join("\n  ");
 }
 
 function printVariableType(type: GraphQLInputType): string {
-  if (type instanceof GraphQLNonNull) {
-    return `{
+	if (type instanceof GraphQLNonNull) {
+		return `{
       readonly kind: "non_null";
       readonly inner: ${printVariableType(type.ofType)};
     }`;
-  }
-  if (type instanceof GraphQLList) {
-    return `{
+	}
+	if (type instanceof GraphQLList) {
+		return `{
       readonly kind: "list";
       readonly inner: ${printVariableType(type.ofType)};
     }`;
-  }
-  if (type instanceof GraphQLScalarType) {
-    return `{
+	}
+	if (type instanceof GraphQLScalarType) {
+		return `{
       readonly kind: "scalar";
       readonly name: "${type.name}";
     }`;
-  }
-  if (type instanceof GraphQLEnumType) {
-    return `{
+	}
+	if (type instanceof GraphQLEnumType) {
+		return `{
       readonly kind: "enum";
       readonly name: "${type.name}";
     }`;
-  }
-  if (type instanceof GraphQLInputObjectType) {
-    return `{
+	}
+	if (type instanceof GraphQLInputObjectType) {
+		return `{
       readonly kind: "input_object";
       readonly name: "${type.name}";
     }`;
-  }
-  throw new Error("Unknown input type");
+	}
+	throw new Error("Unknown input type");
 }
 
 function variableUnion(type: GraphQLInputType): string {
-  const union = [];
+	const union = [];
 
-  if (type instanceof GraphQLNonNull) {
-    union.push(printVariableType(type));
-    if (type.ofType instanceof GraphQLList) {
-      union.push(variableUnion(type.ofType.ofType));
-    }
-  } else if (type instanceof GraphQLList) {
-    union.push(
-      `Array<${printVariableType(type.ofType)}>`,
-      printVariableType(type),
-      printVariableType(new GraphQLNonNull(type))
-    );
-  } else {
-    union.push(
-      printVariableType(type),
-      printVariableType(new GraphQLNonNull(type))
-    );
-  }
+	if (type instanceof GraphQLNonNull) {
+		union.push(printVariableType(type));
+		if (type.ofType instanceof GraphQLList) {
+			union.push(variableUnion(type.ofType.ofType));
+		}
+	} else if (type instanceof GraphQLList) {
+		union.push(
+			`Array<${printVariableType(type.ofType)}>`,
+			printVariableType(type),
+			printVariableType(new GraphQLNonNull(type)),
+		);
+	} else {
+		union.push(
+			printVariableType(type),
+			printVariableType(new GraphQLNonNull(type)),
+		);
+	}
 
-  return union.join(" | ");
+	return union.join(" | ");
 }
 
 function makeSelectionResult(type: GraphQLNamedType) {
-  let possibleTypes: string;
-  if (type instanceof GraphQLObjectType) {
-    possibleTypes = `PossibleTypes_${type.name}`;
-  } else if (type instanceof GraphQLInterfaceType) {
-    possibleTypes = `PossibleTypes_${type.name} | "${type.name}"`;
-  } else if (type instanceof GraphQLUnionType) {
-    possibleTypes = `PossibleTypes_${type.name} | "${type.name}"`;
-  } else {
-    throw new Error("Expected object, interface, or union type");
-  }
-  return `ReadonlyArray<SelectionSetSelection<${possibleTypes}>>`;
+	let possibleTypes: string;
+	if (type instanceof GraphQLObjectType) {
+		possibleTypes = `PossibleTypes_${type.name}`;
+	} else if (type instanceof GraphQLInterfaceType) {
+		possibleTypes = `PossibleTypes_${type.name} | "${type.name}"`;
+	} else if (type instanceof GraphQLUnionType) {
+		possibleTypes = `PossibleTypes_${type.name} | "${type.name}"`;
+	} else {
+		throw new Error("Expected object, interface, or union type");
+	}
+	return `ReadonlyArray<SelectionSetSelection<${possibleTypes}>>`;
 }
 
-function buildOperationBuilder(
-  type: GraphQLObjectType
-): InterfaceDeclarationStructure {
-  const { name } = type;
-  const selectionSetResult = makeSelectionResult(type);
-  return {
-    kind: StructureKind.Interface,
-    name: "Builder_Operation_" + name,
-    callSignatures: [
-      {
-        typeParameters: [
-          {
-            name: "Result",
-            constraint: selectionSetResult,
-            isConst: true,
-          },
-        ],
-        parameters: [
-          {
-            name: "name",
-            type: "string",
-          },
-          {
-            name: "builder",
-            type: `(b: Builder_${name}) => Result`,
-          },
-        ],
-        returnType: `Operation<SelectionSetOutput<Result, "${name}">, {}>`,
-      },
-      {
-        typeParameters: [
-          {
-            name: "Result",
-            constraint: selectionSetResult,
-            isConst: true,
-          },
-          {
-            name: "Variables",
-            constraint: "Record<string, string>",
-            isConst: true,
-          },
-        ],
-        parameters: [
-          {
-            name: "name",
-            type: "string",
-          },
-          {
-            name: "variables",
-            type: "Variables",
-          },
-          {
-            name: "builder",
-            type: `
-                (b: Builder_${name}, v: {
-                  [K in keyof Variables]: ParseVariableDef<Variables[K]>
-                }) => Result
-              `,
-          },
-        ],
-        returnType: `Operation<SelectionSetOutput<Result, "${name}">, {
+function buildOperationBuilder(type: GraphQLObjectType): string {
+	const { name } = type;
+	const selectionSetResult = makeSelectionResult(type);
+	return `interface Builder_Operation_${name} {
+  <const Result extends ${selectionSetResult}>(name: string, builder: (b: Builder_${name}) => Result): Operation<SelectionSetOutput<Result, "${name}">, {}>;
+  <const Result extends ${selectionSetResult}, const Variables extends Record<string, string>>(name: string, variables: Variables, builder: (b: Builder_${name}, v: {
+    [K in keyof Variables]: ParseVariableDef<Variables[K]>
+  }) => Result): Operation<SelectionSetOutput<Result, "${name}">, {
+    [K in keyof Variables]: VariableInput<ParseVariableDef<Variables[K]>>
+  }>;
+}`;
+}
+
+async function generateForSchema(config: SchemaGenerationConfig) {
+	let schema: GraphQLSchema;
+
+	if (config.schema instanceof GraphQLSchema) {
+		schema = config.schema;
+	} else if ("introspect" in config.schema) {
+		schema = await loadSchemaFromUrl(config.schema.introspect);
+	} else {
+		schema = await loadSchemaFromFile(config.schema.sdl);
+	}
+
+	const { output } = config;
+
+	// Build the import statement
+	const imports = `import type {
+  Field,
+  InlineFragment,
+  FragmentSpread,
+  FragmentDefinition,
+  FragmentDefinitionWithVariables,
+  Operation,
+  SelectionSetOutput,
+  SelectionOutput,
+  SelectionSetSelection,
+  EnumValue,
+} from "@gqlb/core";`;
+
+	const statements: string[] = [];
+
+	const typeEntries = Object.entries(schema.getTypeMap()).filter(
+		([name]) => !name.startsWith("__"),
+	);
+
+	console.log(`Parsing ${typeEntries.length} types...`);
+	for (const [name, type] of typeEntries) {
+		if (
+			type instanceof GraphQLObjectType ||
+			type instanceof GraphQLInterfaceType
+		) {
+			if (type instanceof GraphQLObjectType) {
+				statements.push(`type PossibleTypes_${name} = "${type.name}";`);
+			} else if (type instanceof GraphQLInterfaceType) {
+				const possibleTypeNames = schema
+					.getPossibleTypes(type)
+					.map((t) => `"${t.name}"`);
+				statements.push(
+					`type PossibleTypes_${name} = ${possibleTypeNames.join(" | ")};`,
+				);
+			}
+
+			const fieldMethods = methodsForFields(type.getFields());
+			const inlineFragmentMethods = builderFunctionsForInlineFragments(
+				name,
+				schema,
+				type,
+			);
+			statements.push(`interface Builder_${name} {
+  ${fieldMethods}
+  ${inlineFragmentMethods}
+}`);
+		} else if (type instanceof GraphQLEnumType) {
+			const values = type
+				.getValues()
+				.map((v) => `"${v.name}"`)
+				.join(" | ");
+			statements.push(`interface Enum_${name} {
+  readonly kind: "enum";
+  readonly _input: ${values};
+  readonly _output: ${values};
+}`);
+		} else if (type instanceof GraphQLUnionType) {
+			const unionTypes = type
+				.getTypes()
+				.map((t) => `"${t.name}"`)
+				.join(" | ");
+			statements.push(`type PossibleTypes_${name} = ${unionTypes};`);
+
+			const inlineFragmentBuilders = builderFunctionsForInlineFragments(
+				name,
+				schema,
+				type,
+			);
+			statements.push(`interface Builder_${name} {
+  ${inlineFragmentBuilders}
+}`);
+		} else if (type instanceof GraphQLInputObjectType) {
+			const properties = Object.values(type.getFields())
+				.map((f) => {
+					const optional = f.type instanceof GraphQLNonNull ? "" : "?";
+					return `readonly ${f.name}${optional}: ${argumentUnion(f.type)};`;
+				})
+				.join("\n  ");
+
+			statements.push(`interface InputObject_${name} {
+  ${properties}
+}`);
+
+			const variableProperties = Object.values(type.getFields())
+				.map((f) => {
+					const optional = f.type instanceof GraphQLNonNull ? "" : "?";
+					return `readonly ${f.name}${optional}: ${argumentUnion(f.type)} | ${variableUnion(f.type)};`;
+				})
+				.join("\n  ");
+
+			statements.push(`interface InputObject_${name}_Variables {
+  ${variableProperties}
+}`);
+		} else if (type instanceof GraphQLScalarType) {
+			const scalarTypes = getScalarTypes(config);
+			const scalarType = scalarTypes[name] ?? "unknown";
+			statements.push(`interface Scalar_${name} {
+  readonly kind: "scalar";
+  readonly _input: ${scalarType};
+  readonly _output: ${scalarType};
+}`);
+		}
+	}
+	console.log(`Parsed ${typeEntries.length} types successfully`);
+
+	// Add variable types
+	const scalarVariableTypes = Object.values(schema.getTypeMap())
+		.filter((t) => t instanceof GraphQLScalarType)
+		.map((t) => `readonly ${t.name}: Scalar_${t.name}["_input"];`)
+		.join("\n    ");
+
+	statements.push(`type VariableScalarTypes = {
+    ${scalarVariableTypes}
+  };`);
+
+	const enumVariableTypes = Object.values(schema.getTypeMap())
+		.filter((t) => t instanceof GraphQLEnumType && !t.name.startsWith("__"))
+		.map((t) => `readonly ${t.name}: Enum_${t.name}["_input"];`)
+		.join("\n    ");
+
+	statements.push(`type VariableEnumTypes = {
+    ${enumVariableTypes}
+  };`);
+
+	const inputObjectVariableTypes = Object.values(schema.getTypeMap())
+		.filter((t) => t instanceof GraphQLInputObjectType)
+		.map((t) => `readonly ${t.name}: InputObject_${t.name};`)
+		.join("\n    ");
+
+	statements.push(`type VariableInputObjectTypes = {
+    ${inputObjectVariableTypes}
+  };`);
+
+	statements.push(`type ParseVariableDef<T> =
+    T extends \`[\${infer Inner}]\`
+    ? {
+        readonly kind: "list";
+        readonly inner: ParseVariableDef<Inner>;
+      }
+    : T extends \`\${infer Inner}!\`
+    ? {
+        readonly kind: "non_null";
+        readonly inner: ParseVariableDef<Inner>;
+      }
+    : T extends keyof VariableScalarTypes
+    ? {
+        readonly kind: "scalar";
+        readonly name: T;
+        readonly _input: VariableScalarTypes[T];
+      }
+    : T extends keyof VariableEnumTypes
+    ? {
+        readonly kind: "enum";
+        readonly name: T;
+        readonly _input: VariableEnumTypes[T];
+      }
+    : T extends keyof VariableInputObjectTypes
+    ? {
+        readonly kind: "input_object";
+        readonly name: T;
+        readonly _input: VariableInputObjectTypes[T];
+      }
+    : "Unknown variable type";`);
+
+	statements.push(`export type VariableInput<T> =
+    T extends { readonly kind: "non_null"; readonly inner: infer Inner }
+    ? Exclude<VariableInput<Inner>, null>
+    : T extends { readonly kind: "list"; readonly inner: infer Inner }
+    ? ReadonlyArray<VariableInput<Inner>> | null
+    : T extends { readonly kind: "scalar"; readonly name: infer Name }
+    ? VariableScalarTypes[Name & keyof VariableScalarTypes] | null
+    : T extends { readonly kind: "enum"; readonly name: infer Name }
+    ? VariableEnumTypes[Name & keyof VariableEnumTypes] | null
+    : T extends { readonly kind: "input_object"; readonly name: infer Name }
+    ? VariableInputObjectTypes[Name & keyof VariableInputObjectTypes] | null
+    : "Unknown variable type";`);
+
+	statements.push(`type AllowNonNullableVariables<T> =
+    T extends { readonly kind: "non_null" }
+    ? T
+    : T extends { readonly kind: "list"; readonly inner: infer Inner }
+    ? { readonly kind: "non_null"; readonly inner: Inner }
+    : T;`);
+
+	// Generate fragment builder interface
+	const fragmentCallSignatures: string[] = [];
+	for (const type of Object.values(schema.getTypeMap())) {
+		if (
+			(type instanceof GraphQLObjectType ||
+				type instanceof GraphQLInterfaceType ||
+				type instanceof GraphQLUnionType) &&
+			!type.name.startsWith("__")
+		) {
+			const resultConstraint = makeSelectionResult(type);
+			let possibleTypes = `Exclude<PossibleTypes_${type.name}, "${type.name}">`;
+			if (type instanceof GraphQLObjectType) {
+				possibleTypes = `PossibleTypes_${type.name}`;
+			}
+
+			fragmentCallSignatures.push(
+				`<const Result extends ${resultConstraint}, Name extends string>(name: Name, typeCondition: "${type.name}", builder: (b: Builder_${type.name}) => Result): FragmentDefinition<Name, ${possibleTypes}, "${type.name}", SelectionSetOutput<Result, ${possibleTypes}>>;`,
+			);
+
+			fragmentCallSignatures.push(
+				`<const Result extends ${resultConstraint}, Name extends string, const Variables extends Record<string, string>>(name: Name, typeCondition: "${type.name}", variables: Variables, builder: (b: Builder_${type.name}, v: {
+          [K in keyof Variables]: ParseVariableDef<Variables[K]>
+        }) => Result): FragmentDefinitionWithVariables<Name, ${possibleTypes}, "${type.name}", {
+          [K in keyof Variables]: AllowNonNullableVariables<ParseVariableDef<Variables[K]>>
+        }, SelectionSetOutput<Result, ${possibleTypes}>, {
           [K in keyof Variables]: VariableInput<ParseVariableDef<Variables[K]>>
-        }>`,
-      },
-    ],
-  };
-}
+        }>;`,
+			);
+		}
+	}
 
-async function generateForSchema(
-  name: string,
-  config: z.output<typeof schema>["generate"][string]
-) {
-  let schema: GraphQLSchema;
+	statements.push(`interface Builder_Fragment {
+  ${fragmentCallSignatures.join("\n  ")}
+}`);
 
-  if (config.schema instanceof GraphQLSchema) {
-    schema = config.schema;
-  } else if ("introspect" in config.schema) {
-    schema = await loadSchemaFromUrl(config.schema.introspect);
-  } else {
-    schema = await loadSchemaFromFile(config.schema.sdl);
-  }
+	const rootBuilderTypes: Record<string, string> = {
+		fragment: "Builder_Fragment",
+	};
 
-  const { output } = config;
+	const queryType = schema.getQueryType();
+	if (queryType) {
+		const iface = buildOperationBuilder(queryType);
+		statements.push(iface);
+		rootBuilderTypes.query = `Builder_Operation_${queryType.name}`;
+	}
 
-  const file = project.createSourceFile(
-    path.join(process.cwd(), output, "builder.d.ts"),
-    undefined,
-    {
-      overwrite: true,
-    }
-  );
+	const mutationType = schema.getMutationType();
+	if (mutationType) {
+		const iface = buildOperationBuilder(mutationType);
+		statements.push(iface);
+		rootBuilderTypes.mutation = `Builder_Operation_${mutationType.name}`;
+	}
 
-  file.addImportDeclaration({
-    moduleSpecifier: "@gqlb/core",
-    namedImports: [
-      "Field",
-      "InlineFragment",
-      "FragmentSpread",
-      "FragmentDefinition",
-      "FragmentDefinitionWithVariables",
-      "Operation",
-      "SelectionSetOutput",
-      "SelectionOutput",
-      "SelectionSetSelection",
-      "EnumValue",
-    ],
-    isTypeOnly: true,
-  });
+	const subscriptionType = schema.getSubscriptionType();
+	if (subscriptionType) {
+		const iface = buildOperationBuilder(subscriptionType);
+		statements.push(iface);
+		rootBuilderTypes.subscription = `Builder_Operation_${subscriptionType.name}`;
+	}
 
-  const statements: StatementStructures[] = [];
+	const builderTypeEntries = Object.entries(rootBuilderTypes)
+		.map(([k, v]) => `readonly ${k}: ${v};`)
+		.join("\n  ");
 
-  const typeEntries = Object.entries(schema.getTypeMap()).filter(
-    ([name]) => !name.startsWith("__")
-  );
+	statements.push(`export type Builder = {
+  ${builderTypeEntries}
+};`);
 
-  console.log(`Parsing ${typeEntries.length} types...`);
-  for (const [name, type] of typeEntries) {
-    if (
-      type instanceof GraphQLObjectType ||
-      type instanceof GraphQLInterfaceType
-    ) {
-      if (type instanceof GraphQLObjectType) {
-        statements.push({
-          kind: StructureKind.TypeAlias,
-          name: `PossibleTypes_${name}`,
-          type: `"${type.name}"`,
-        });
-      } else if (type instanceof GraphQLInterfaceType) {
-        statements.push({
-          kind: StructureKind.TypeAlias,
-          name: `PossibleTypes_${name}`,
-          type: [
-            ...schema.getPossibleTypes(type).map((t) => `"${t.name}"`),
-          ].join(" | "),
-        });
-      }
+	// Generate the module declaration
+	const moduleContent = `declare module "./builder" {
+  ${statements.join("\n\n  ")}
+}`;
 
-      const fieldMethods = methodsForFields(type.getFields());
-      const inlineFragmentMethods = builderFunctionsForInlineFragments(
-        name,
-        schema,
-        type
-      );
-      statements.push({
-        kind: StructureKind.Interface,
-        name: `Builder_${name}`,
-        methods: fieldMethods.concat(inlineFragmentMethods),
-      });
-    } else if (type instanceof GraphQLEnumType) {
-      const values = type
-        .getValues()
-        .map((v) => `"${v.name}"`)
-        .join(" | ");
-      statements.push({
-        kind: StructureKind.Interface,
-        name: `Enum_${name}`,
-        properties: [
-          {
-            name: "kind",
-            type: `"enum"`,
-          },
-          {
-            name: "_input",
-            type: values,
-          },
-          {
-            name: "_output",
-            type: values,
-          },
-        ],
-      });
-    } else if (type instanceof GraphQLUnionType) {
-      statements.push({
-        kind: StructureKind.TypeAlias,
-        name: `PossibleTypes_${name}`,
-        type: type
-          .getTypes()
-          .map((t) => `"${t.name}"`)
-          .join(" | "),
-      });
+	const finalContent = `${imports}
 
-      const inlineFragmentBuilders = builderFunctionsForInlineFragments(
-        name,
-        schema,
-        type
-      );
-      const builders: Record<string, string> = {};
-      for (const b in inlineFragmentBuilders) {
-        builders[b] = inlineFragmentBuilders[b].name;
-      }
-      statements.push({
-        kind: StructureKind.Interface,
-        name: `Builder_${name}`,
-        methods: inlineFragmentBuilders,
-      });
-    } else if (type instanceof GraphQLInputObjectType) {
-      statements.push({
-        kind: StructureKind.Interface,
-        name: `InputObject_${name}`,
-        properties: Object.values(type.getFields()).map((f) => ({
-          name: f.name,
-          type: argumentUnion(f.type),
-          isReadonly: true,
-          hasQuestionToken: !(f.type instanceof GraphQLNonNull),
-        })),
-      });
+${moduleContent}`;
 
-      statements.push({
-        kind: StructureKind.Interface,
-        name: `InputObject_${name}_Variables`,
-        properties: Object.values(type.getFields()).map((f) => ({
-          name: f.name,
-          type: `${argumentUnion(f.type)} | ${variableUnion(f.type)}`,
-          isReadonly: true,
-          hasQuestionToken: !(f.type instanceof GraphQLNonNull),
-        })),
-      });
-    } else if (type instanceof GraphQLScalarType) {
-      const scalarTypes = getScalarTypes(config);
-      statements.push({
-        kind: StructureKind.Interface,
-        name: `Scalar_${name}`,
-        properties: [
-          {
-            name: "kind",
-            type: `"scalar"`,
-          },
-          {
-            name: "_input",
-            type: scalarTypes[name] ?? "unknown",
-          },
-          {
-            name: "_output",
-            type: scalarTypes[name] ?? "unknown",
-          },
-        ],
-      });
-    }
-  }
-  console.log(`Parsed ${typeEntries.length} types successfully`);
+	const outputDir = path.join(process.cwd(), output);
 
-  statements.push({
-    kind: StructureKind.TypeAlias,
-    name: "VariableScalarTypes",
-    type: `{
-      ${Object.values(schema.getTypeMap())
-        .filter((t) => t instanceof GraphQLScalarType)
-        .map((t) => `readonly ${t.name}: Scalar_${t.name}["_input"]`)
-        .join(";\n")}
-    }`,
-  });
+	await fs.mkdir(outputDir, { recursive: true });
+	await fs.writeFile(path.join(outputDir, "builder.d.ts"), finalContent);
+	if (config.emitTypes) {
+		await fs.writeFile(
+			path.join(outputDir, "types.d.ts"),
+			await makeTypesFile(schema, config),
+		);
+	}
 
-  statements.push({
-    kind: StructureKind.TypeAlias,
-    name: "VariableEnumTypes",
-    type: `{
-      ${Object.values(schema.getTypeMap())
-        .filter((t) => t instanceof GraphQLEnumType && !t.name.startsWith("__"))
-        .map((t) => `readonly ${t.name}: Enum_${t.name}["_input"]`)
-        .join(";\n")}
-    }`,
-  });
-
-  statements.push({
-    kind: StructureKind.TypeAlias,
-    name: "VariableInputObjectTypes",
-    type: `{
-      ${Object.values(schema.getTypeMap())
-        .filter((t) => t instanceof GraphQLInputObjectType)
-        .map((t) => `readonly ${t.name}: InputObject_${t.name}`)
-        .join(";\n")}
-    }`,
-  });
-
-  statements.push({
-    kind: StructureKind.TypeAlias,
-    name: "ParseVariableDef",
-    typeParameters: [
-      {
-        name: "T",
-      },
-    ],
-    type: `
-      T extends \`[\${infer Inner}]\`
-      ? {
-          readonly kind: "list";
-          readonly inner: ParseVariableDef<Inner>;
-        }
-      : T extends \`\${infer Inner}!\`
-      ? {
-          readonly kind: "non_null";
-          readonly inner: ParseVariableDef<Inner>;
-        }
-      : T extends keyof VariableScalarTypes
-      ? {
-          readonly kind: "scalar";
-          readonly name: T;
-          readonly _input: VariableScalarTypes[T];
-        }
-      : T extends keyof VariableEnumTypes
-      ? {
-          readonly kind: "enum";
-          readonly name: T;
-          readonly _input: VariableEnumTypes[T];
-        }
-      : T extends keyof VariableInputObjectTypes
-      ? {
-          readonly kind: "input_object";
-          readonly name: T;
-          readonly _input: VariableInputObjectTypes[T];
-        }
-      : "Unknown variable type"
-    `,
-  });
-
-  statements.push({
-    kind: StructureKind.TypeAlias,
-    name: "VariableInput",
-    isExported: true,
-    typeParameters: [{ name: "T" }],
-    type: `
-      T extends { readonly kind: "non_null"; readonly inner: infer Inner }
-      ? Exclude<VariableInput<Inner>, null>
-      : T extends { readonly kind: "list"; readonly inner: infer Inner }
-      ? ReadonlyArray<VariableInput<Inner>> | null
-      : T extends { readonly kind: "scalar"; readonly name: infer Name }
-      ? VariableScalarTypes[Name & keyof VariableScalarTypes] | null
-      : T extends { readonly kind: "enum"; readonly name: infer Name }
-      ? VariableEnumTypes[Name & keyof VariableEnumTypes] | null
-      : T extends { readonly kind: "input_object"; readonly name: infer Name }
-      ? VariableInputObjectTypes[Name & keyof VariableInputObjectTypes] | null
-      : "Unknown variable type"
-    `,
-  });
-
-  statements.push({
-    kind: StructureKind.TypeAlias,
-    name: "AllowNonNullableVariables",
-    typeParameters: [{ name: "T" }],
-    type: `
-      T extends { readonly kind: "non_null" }
-      ? T
-      : T extends { readonly kind: "list"; readonly inner: infer Inner }
-      ? { readonly kind: "non_null"; readonly inner: Inner }
-      : T
-    `,
-  });
-
-  const fragmentBuilderIfaceName = "Builder_Fragment";
-
-  statements.push({
-    kind: StructureKind.Interface,
-    name: fragmentBuilderIfaceName,
-    callSignatures: Object.values(schema.getTypeMap())
-      .map((type): CallSignatureDeclarationStructure[] => {
-        if (
-          type instanceof GraphQLObjectType ||
-          type instanceof GraphQLInterfaceType ||
-          type instanceof GraphQLUnionType
-        ) {
-          if (type.name.startsWith("__")) {
-            return [];
-          }
-          const resultTypeParameter = {
-            name: "Result",
-            constraint: makeSelectionResult(type),
-            isConst: true,
-          };
-          let possibleTypes = `Exclude<PossibleTypes_${type.name}, "${type.name}">`;
-          if (type instanceof GraphQLObjectType) {
-            possibleTypes = `PossibleTypes_${type.name}`;
-          }
-          const callSignatures: CallSignatureDeclarationStructure[] = [];
-          callSignatures.push({
-            kind: StructureKind.CallSignature,
-            typeParameters: [
-              resultTypeParameter,
-              {
-                name: "Name",
-                constraint: "string",
-              },
-            ],
-            parameters: [
-              {
-                name: "name",
-                type: "Name",
-              },
-              {
-                name: "typeCondition",
-                type: `"${type.name}"`,
-              },
-              {
-                name: "builder",
-                type: `(b: Builder_${type.name}) => Result`,
-              },
-            ],
-            returnType: `FragmentDefinition<Name, ${possibleTypes}, "${type.name}", SelectionSetOutput<Result, ${possibleTypes}>>`,
-          });
-          callSignatures.push({
-            kind: StructureKind.CallSignature,
-            typeParameters: [
-              resultTypeParameter,
-              {
-                name: "Name",
-                constraint: "string",
-              },
-              {
-                name: "Variables",
-                constraint: "Record<string, string>",
-                isConst: true,
-              },
-            ],
-            parameters: [
-              {
-                name: "name",
-                type: "Name",
-              },
-              {
-                name: "typeCondition",
-                type: `"${type.name}"`,
-              },
-              {
-                name: "variables",
-                type: "Variables",
-              },
-              {
-                name: "builder",
-                type: `
-                  (b: Builder_${type.name}, v: {
-                    [K in keyof Variables]: ParseVariableDef<Variables[K]>
-                  }) => Result
-                `,
-              },
-            ],
-            returnType: `FragmentDefinitionWithVariables<Name, ${possibleTypes}, "${type.name}", {
-              [K in keyof Variables]: AllowNonNullableVariables<ParseVariableDef<Variables[K]>>
-            }, SelectionSetOutput<Result, ${possibleTypes}>, {
-              [K in keyof Variables]: VariableInput<ParseVariableDef<Variables[K]>>
-            }>`,
-          });
-          return callSignatures;
-        }
-        return [];
-      })
-      .flat(),
-  });
-
-  const rootBuilderTypes: Record<string, string> = {
-    fragment: fragmentBuilderIfaceName,
-  };
-
-  const queryType = schema.getQueryType();
-  if (queryType) {
-    const iface = buildOperationBuilder(queryType);
-    statements.push(iface);
-    rootBuilderTypes.query = iface.name;
-  }
-
-  const mutationType = schema.getMutationType();
-  if (mutationType) {
-    const iface = buildOperationBuilder(mutationType);
-    statements.push(iface);
-    rootBuilderTypes.mutation = iface.name;
-  }
-
-  const subscriptionType = schema.getSubscriptionType();
-  if (subscriptionType) {
-    const iface = buildOperationBuilder(subscriptionType);
-    statements.push(iface);
-    rootBuilderTypes.subscription = iface.name;
-  }
-
-  statements.push({
-    kind: StructureKind.TypeAlias,
-    name: "Builder",
-    type: `{
-      ${Object.entries(rootBuilderTypes)
-        .map(([k, v]) => `readonly ${k}: ${v}`)
-        .join(";\n")}
-    }`,
-    isExported: true,
-  });
-
-  file.addStatements([
-    {
-      kind: StructureKind.Module,
-      name: `"./builder"`,
-      hasDeclareKeyword: true,
-      declarationKind: ModuleDeclarationKind.Module,
-      statements,
-    },
-  ]);
-
-  const diag = file.getPreEmitDiagnostics();
-  let text = file.getFullText();
-
-  // if (diag.length > 0) {
-  //   for (const d of diag) {
-  //     const code = text.slice(d.getStart()!, d.getStart()! + d.getLength()!);
-  //     console.log(`${code} > [${d.getLineNumber()}] ${d.getMessageText()}`);
-  //   }
-  //   console.log(`Skipping prettier due to ${diag.length} errors`);
-  // }
-
-  text = await prettier.format(file.getFullText(), {
-    parser: "typescript",
-  });
-
-  const outputDir = path.join(process.cwd(), output);
-
-  await fs.mkdir(outputDir, { recursive: true });
-  await fs.writeFile(path.join(outputDir, "builder.d.ts"), text);
-  if (config.emitTypes) {
-    await fs.writeFile(
-      path.join(outputDir, "types.d.ts"),
-      await makeTypesFile(schema, config, project, outputDir)
-    );
-  }
-
-  await fs.writeFile(
-    path.join(outputDir, "index.ts"),
-    await prettier.format(
-      `
-        /* eslint-disable */
-        import type {Builder} from "./builder";
-        import {builder} from "@gqlb/core"
-        export const b = builder as any as Builder;
-        ${config.possibleTypes ? makePossibleTypes(schema) : ""}
-        ${config.emitTypes ? `export type { types } from "./types";` : ""}
-      `,
-      {
-        parser: "typescript",
-      }
-    )
-  );
+	await fs.writeFile(
+		path.join(outputDir, "index.ts"),
+		`/* eslint-disable */
+import type {Builder} from "./builder";
+import {builder} from "@gqlb/core"
+export const b = builder as any as Builder;
+${config.possibleTypes ? makePossibleTypes(schema) : ""}
+${config.emitTypes ? `export type { types } from "./types";` : ""}
+`,
+	);
 }
 
 export async function generate() {
-  const { generate } = await loadConfig();
-  for (const [name, config] of Object.entries(generate)) {
-    console.log(`Generating types for ${name}...`);
-    await generateForSchema(name, config);
-  }
+	const { generate } = await loadConfig();
+	let configs: SchemaGenerationConfig[];
+	if (Array.isArray(generate)) {
+		configs = generate;
+	} else {
+		configs = [generate];
+	}
+
+	for (const [index, config] of configs.entries()) {
+		const name = config.name ?? `schema #${index + 1}`;
+		console.log(`Generating types for ${name}:`);
+		await generateForSchema(config);
+	}
 }

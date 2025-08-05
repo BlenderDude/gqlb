@@ -1,8 +1,12 @@
 {
-  "scripts": {
-    "ci:publish": "pnpm publish -r"
-  },
-  "dependencies": {
-    "@changesets/cli": "^2.26.2"
-  }
+	"scripts": {
+		"ci:publish": "pnpm publish -r",
+		"lint": "biome check --write"
+	},
+	"dependencies": {
+		"@changesets/cli": "^2.26.2"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.1.3"
+	}
 }

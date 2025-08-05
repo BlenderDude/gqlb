@@ -1,68 +1,68 @@
 type Image {
-  url(size: Int!): String!
+	url(size: Int!): String!
 }
 
 interface Node {
-  id: String!
+	id: String!
 }
 
 type PageInfo {
-  hasNextPage: Boolean!
-  hasPreviousPage: Boolean!
-  startCursor: String!
-  endCursor: String!
+	hasNextPage: Boolean!
+	hasPreviousPage: Boolean!
+	startCursor: String!
+	endCursor: String!
 }
 
 type CartEdge {
-  cursor: String!
-  node: Product!
+	cursor: String!
+	node: Product!
 }
 
 type CartConnection {
-  edges: [CartEdge!]!
-  nodes: [Product!]!
-  pageInfo: PageInfo!
+	edges: [CartEdge!]!
+	nodes: [Product!]!
+	pageInfo: PageInfo!
 }
 
 type User implements Node {
-  id: String!
-  name: String!
-  email: String!
-  avatar: Image!
-  cart(first: Int, after: String): CartConnection!
+	id: String!
+	name: String!
+	email: String!
+	avatar: Image!
+	cart(first: Int, after: String): CartConnection!
 }
 
 type Product implements Node {
-  id: String!
-  name: String!
-  description: String!
-  price: Float!
-  image: Image!
+	id: String!
+	name: String!
+	description: String!
+	price: Float!
+	image: Image!
 }
 
 type MutationError {
-  message: String!
+	message: String!
 }
 
 type AddToCartMutationResult {
-  cart: CartConnection!
+	cart: CartConnection!
 }
 
 union AddToCartMutation = AddToCartMutationResult | MutationError
 
 type Query {
-  node(id: String!): Node
-  user(id: String!): User
-  product(id: String!): Product
-  products: [Product]
-  viewer: User!
-  fieldWithDefaultArgs(arg1: String = "default"): String!
+	node(id: String!): Node
+	user(id: String!): User
+	product(id: String!): Product
+	products: [Product]
+	viewer: User!
+	fieldWithDefaultArgs(arg1: String = "default"): String!
 }
 
 type UserMutation {
-  addToCart(productId: String!): AddToCartMutation!
+	addToCart(productId: String!): AddToCartMutation!
 }
 
 type Mutation {
-  user: UserMutation!
+	user: UserMutation!
 }
