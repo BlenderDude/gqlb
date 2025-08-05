@@ -3,7 +3,7 @@ compatibility_date = "2025-04-01"
 
 [assets]
 directory = "./packages/docs/.vitepress/dist"
-not_found_handling = "single-page-application"
+not_found_handling = "404-page"
 
 [build]
 command = "pnpm docs:build"
