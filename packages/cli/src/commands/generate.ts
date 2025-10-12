@@ -58,9 +58,21 @@ async function makeTypesFile(
 	for (const t of Object.values(schema.getTypeMap())) {
 		if (t.name.startsWith("__")) continue;
 
-		if (t instanceof GraphQLObjectType || t instanceof GraphQLInputObjectType) {
+		// Emit output object types (include __typename) and input object types (no __typename)
+		if (t instanceof GraphQLObjectType) {
 			const fields = Object.values(t.getFields())
 				.map((f) => `  ${makeFieldProperty(f)};`)
+				.join("\n");
+
+			typeAliases.push(`export type ${t.name} = {
+  readonly __typename: "${t.name}";
+${fields}
+};`);
+			continue;
+		}
+		if (t instanceof GraphQLInputObjectType) {
+			const fields = Object.values(t.getFields())
+				.map((f) => `  ${makeFieldProperty(f as unknown as GraphQLField<unknown, unknown>)};`)
 				.join("\n");
 
 			typeAliases.push(`export type ${t.name} = {
@@ -102,14 +114,15 @@ ${fields}
 				.map((f) => `  ${makeFieldProperty(f)};`)
 				.join("\n");
 
-			const possibleTypes = schema
+			const possibleTypenames = schema
 				.getPossibleTypes(t)
-				.map((t) => t.name)
+				.map((pt) => `"${pt.name}"`)
 				.join(" | ");
 
 			typeAliases.push(`export type ${t.name} = {
+  readonly __typename: ${possibleTypenames};
 ${fields}
-} & (${possibleTypes});`);
+};`);
 		}
 	}
 
@@ -239,13 +252,13 @@ function methodsForFields(fieldMap: GraphQLFieldMap<unknown, unknown>): string {
 			if (hasAnyArgs) {
 				const argumentType = `{
             ${field.args
-							.map((arg) => {
-								const optional = isRequiredArgument(arg) ? "" : "?";
-								return `readonly ${arg.name}${optional}: ${argumentUnion(
-									arg.type,
-								)} | ${variableUnion(arg.type)}`;
-							})
-							.join(";\n            ")}
+						.map((arg) => {
+							const optional = isRequiredArgument(arg) ? "" : "?";
+							return `readonly ${arg.name}${optional}: ${argumentUnion(
+								arg.type,
+							)} | ${variableUnion(arg.type)}`;
+						})
+						.join(";\n            ")}
           }`;
 				methods.push(
 					`${jsdocComment}${field.name}(args?: ${argumentType}): ${result(output, field.type)};`,
